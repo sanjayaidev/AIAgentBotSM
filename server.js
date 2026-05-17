@@ -5,7 +5,42 @@ const fs = require('fs');
 const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
+const puppeteerExtra = require('puppeteer-extra');
+const stealth = require('puppeteer-extra-plugin-stealth');
+const fs = require('fs');
+puppeteerExtra.use(stealth());
 
+// Session storage path
+const SESSION_DIR = path.join(__dirname, 'sessions');
+if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR);
+
+async function saveSession(profileName) {
+  const cookies = await page.cookies();
+  const storage = await page.evaluate(() => ({
+    local: JSON.stringify(localStorage),
+    session: JSON.stringify(sessionStorage)
+  }));
+  fs.writeFileSync(
+    path.join(SESSION_DIR, `${profileName.replace(/\s+/g, '_')}.json`),
+    JSON.stringify({ cookies, storage })
+  );
+  log(`💾 Session saved for ${profileName}`);
+}
+
+async function loadSession(profileName) {
+  const sessionFile = path.join(SESSION_DIR, `${profileName.replace(/\s+/g, '_')}.json`);
+  if (!fs.existsSync(sessionFile)) return false;
+  
+  const { cookies, storage } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  await page.setCookie(...cookies);
+  await page.evaluateOnNewDocument(`
+    const data = ${JSON.stringify(storage)};
+    Object.keys(data.local).forEach(k => localStorage.setItem(k, data.local[k]));
+    Object.keys(data.session).forEach(k => sessionStorage.setItem(k, data.session[k]));
+  `);
+  log(`🔓 Session loaded for ${profileName}`);
+  return true;
+}
 // ✅ Middleware for Replit compatibility
 app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'ALLOWALL');
@@ -117,21 +152,17 @@ async function ensureBrowser() {
   if (browser && browser.isConnected()) return;
   const exePath = getChromiumPath();
   log(`Launching Chromium: ${exePath}`);
-  browser = await puppeteer.launch({
-    executablePath: exePath,
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--window-size=1280,720',
-      '--disable-blink-features=AutomationControlled',
-      `--user-agent=${UA}`
-    ],
-    defaultViewport: VIEWPORT,
-    ignoreDefaultArgs: ['--enable-automation']
-  });
+  browser = await puppeteerExtra.launch({
+  executablePath: exePath,
+  headless: true, // Use "new" for Chrome >= 112
+  args: [
+    '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+    '--disable-gpu', '--single-process', '--disable-background-networking',
+    '--disable-sync', '--no-first-run', '--no-default-browser-check'
+  ],
+  defaultViewport: VIEWPORT,
+  ignoreDefaultArgs: ['--enable-automation', '--disable-extensions']
+});
   browser.on('disconnected', () => { browser = null; page = null; log('Browser disconnected', 'warn'); });
 }
 
@@ -290,18 +321,18 @@ async function runProfile(profileName, prompt) {
     log(`▶ Starting: ${profileName}`);
     broadcast('status', { running: true });
     await ensurePage();
-
-    if (profile.url) {
-      let currentUrl = '';
-      try { currentUrl = page.url(); } catch (_) {}
-      const targetHost = new URL(profile.url).hostname;
-      if (!currentUrl.includes(targetHost)) {
-        log(`Navigating to ${profile.url}`);
-        await page.goto(profile.url, { waitUntil: 'networkidle2', timeout: 30000 });
-        await new Promise(r => setTimeout(r, 1000));
-      }
-    }
-
+    const sessionLoaded = await loadSession(profileName);
+if (profile.url) {
+  let currentUrl = '';
+  try { currentUrl = page.url(); } catch (_) {}
+  const targetHost = new URL(profile.url).hostname;
+  if (!currentUrl.includes(targetHost)) {
+    log(`Navigating to ${profile.url}`);
+    await page.goto(profile.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    if (!sessionLoaded) await new Promise(r => setTimeout(r, 3000)); // Wait for auth check
+    await saveSession(profileName);
+  }
+}
     for (let i = 0; i < profile.steps.length; i++) {
       if (shouldStop) { log('⏹ Stopped by user', 'warn'); break; }
       const step = profile.steps[i];
