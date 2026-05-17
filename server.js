@@ -252,23 +252,44 @@ async function executeStep(step, context) {
         break;
 
       case 'copy': {
-        log(`Copy: ${step.selector}${label}`);
-        const selectors = (step.selector || '').split(',').map(s => s.trim());
-        let text = '';
-        for (const sel of selectors) {
-          try {
-            text = await p.evaluate(s => {
-              const els = document.querySelectorAll(s);
-              return els.length ? (els[els.length - 1].innerText || els[els.length - 1].textContent || '') : '';
-            }, sel);
-            if (text.trim()) break;
-          } catch (_) {}
-        }
-        context.result = text;
-        log(`Copied ${text.length} chars`);
-        broadcast('response', { text });
-        break;
-      }
+  log(`Copy: ${step.selector}${label}`);
+  const selectors = (step.selector || '').split(',').map(s => s.trim());
+  let text = '';
+  let attempts = 0;
+  const maxAttempts = step.polling ? 10 : 1;
+
+  while (attempts < maxAttempts) {
+    for (const sel of selectors) {
+      try {
+        text = await p.evaluate(s => {
+          // Fallback chain: innerText → textContent → data attribute → JSON-LD
+          const els = document.querySelectorAll(s);
+          if (!els.length) return '';
+          const el = els[els.length - 1];
+          return el.innerText || el.textContent || 
+                 el.getAttribute('data-response') || 
+                 JSON.stringify(el.querySelector('pre, code, .markdown')?.innerText || '').slice(1, -1);
+        }, sel);
+        if (text.trim().length > 10) break; // Found substantial text
+      } catch (_) {}
+    }
+    if (text.trim() && !step.polling) break;
+    attempts++;
+    await new Promise(r => setTimeout(r, 1500)); // Poll streaming response
+  }
+  
+  // Clean AI artifacts (citations, markdown wrappers, loading states)
+  text = text
+    .replace(/【.*?】/g, '')          // Remove citation markers
+    .replace(/\[citation:\d+\]/g, '') // Remove [citation:1]
+    .replace(/^(Waiting for|Generating|Typing...).*$/gm, '')
+    .trim();
+
+  context.result = text;
+  log(`✅ Copied ${text.length} chars`);
+  broadcast('response', { text });
+  break;
+}
 
       case 'read': {
         log(`Read${step.selector ? ' selector: ' + step.selector : ' at (' + step.x + ',' + step.y + ')'}${label}`);
