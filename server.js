@@ -92,16 +92,24 @@ function saveProfiles(profiles) {
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
 function getChromiumPath() {
+  // ✅ Render/Docker environment
+  if (process.env.RENDER) {
+    return '/usr/bin/chromium';
+  }
+  
+  // Replit/Nix fallback
+  try {
+    const nixPath = execSync('ls -d /nix/store/*chromium-* 2>/dev/null | head -n 1').toString().trim();
+    if (nixPath) return `${nixPath}/bin/chromium`;
+  } catch (_) {}
+  
+  // Local/Linux fallback
   const candidates = ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'];
   for (const cmd of candidates) {
     try {
       return execSync(`which ${cmd}`).toString().trim();
     } catch (_) {}
   }
-  try {
-    const nixPath = execSync('ls -d /nix/store/*chromium-* 2>/dev/null | head -n 1').toString().trim();
-    if (nixPath) return `${nixPath}/bin/chromium`;
-  } catch (_) {}
   return '/usr/bin/chromium';
 }
 
