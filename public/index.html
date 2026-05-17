@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Browser Automation - BotForge</title>
+  <!-- Fixed: Absolute paths for Replit -->
+  <link rel="stylesheet" href="/css/style.css" />
+  <style>
+    /* Fallback styles if CSS fails to load */
+    body { font-family: system-ui, sans-serif; margin: 0; background: #0f0f12; color: #e0e0e0; }
+    header { display: flex; justify-content: space-between; padding: 10px 16px; background: #1a1a20; border-bottom: 1px solid #333; }
+    main { display: flex; gap: 12px; padding: 12px; height: calc(100vh - 50px); }
+    .panel-left { flex: 2; display: flex; flex-direction: column; }
+    .panel-right { flex: 1; display: flex; flex-direction: column; background: #15151a; border-radius: 8px; padding: 12px; }
+    .browser-view { flex: 1; background: #000; border-radius: 6px; overflow: hidden; position: relative; }
+    #liveFrame { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .click-overlay { position: absolute; inset: 0; cursor: crosshair; }
+    .btn-primary { background: #4f46e5; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+    .btn-danger { background: #dc2626; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+    .btn-sm { background: #333; color: #e0e0e0; border: 1px solid #444; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+    .btn-sm:hover { background: #444; }
+    input, textarea, select { background: #222; border: 1px solid #444; color: #e0e0e0; padding: 6px 10px; border-radius: 4px; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    .tab { flex: 1; padding: 8px; background: #222; border: none; color: #aaa; border-radius: 4px; cursor: pointer; }
+    .tab.active { background: #4f46e5; color: white; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .field-group { margin-bottom: 10px; }
+    .field-group label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
+    .response-box { background: #111; border: 1px solid #333; border-radius: 4px; padding: 10px; min-height: 80px; max-height: 200px; overflow-y: auto; font-size: 13px; white-space: pre-wrap; }
+    .log-box { flex: 1; background: #0a0a0d; border: 1px solid #222; border-radius: 4px; padding: 8px; font-family: monospace; font-size: 11px; overflow-y: auto; }
+    .log-entry { padding: 2px 0; border-bottom: 1px solid #1a1a20; }
+    .log-entry.info { color: #93c5fd; }
+    .log-entry.success { color: #86efac; }
+    .log-entry.warn { color: #fcd34d; }
+    .log-entry.error { color: #fca5a5; }
+    .steps-list { flex: 1; overflow-y: auto; margin-bottom: 10px; }
+    .step-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; background: #1a1a20; border-radius: 4px; margin-bottom: 4px; cursor: pointer; font-size: 12px; }
+    .step-item.selected { outline: 2px solid #4f46e5; }
+    .step-drag { cursor: grab; color: #666; }
+    .step-num { background: #333; padding: 2px 6px; border-radius: 3px; font-size: 10px; }
+    .step-action { color: #86efac; font-weight: 500; }
+    .step-lbl { flex: 1; color: #ccc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .step-del { background: none; border: none; color: #f87171; cursor: pointer; font-size: 14px; padding: 0 4px; }
+    .step-del:hover { color: #ef4444; }
+    .marker { position: absolute; width: 20px; height: 20px; background: #4f46e5; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; transform: translate(-50%, -50%); cursor: move; user-select: none; border: 2px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+    .marker.selected { background: #22c55e; }
+    .ripple { position: absolute; width: 30px; height: 30px; border: 2px solid #4f46e5; border-radius: 50%; animation: ripple 0.5s ease-out forwards; pointer-events: none; transform: translate(-50%, -50%); }
+    @keyframes ripple { from { opacity: 1; transform: translate(-50%, -50%) scale(0.3); } to { opacity: 0; transform: translate(-50%, -50%) scale(2); } }
+    .progress-bar-wrap { background: #1a1a20; border-radius: 4px; height: 20px; overflow: hidden; margin: 10px 0; position: relative; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg, #4f46e5, #7c3aed); width: 0%; transition: width 0.2s; }
+    .progress-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; color: white; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+    .toggle-wrap { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #aaa; cursor: pointer; }
+    .toggle-wrap input { width: auto; margin: 0; }
+    .url-bar-wrap { display: flex; gap: 6px; flex: 1; max-width: 400px; }
+    .url-bar-wrap input { flex: 1; }
+    .header-left, .header-right { display: flex; align-items: center; gap: 12px; }
+    .logo { font-weight: 700; color: #4f46e5; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #fbbf24; }
+    .status-dot.connected { background: #22c55e; }
+    .status-dot.error { background: #ef4444; }
+    .status-text { font-size: 12px; color: #aaa; }
+    .running-badge { background: #22c55e; color: #000; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+    .panel-title { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .browser-controls { background: #15151a; border-radius: 6px; padding: 10px; margin-top: 8px; }
+    .ctrl-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    .ctrl-row:last-child { margin-bottom: 0; }
+    .ctrl-label { font-size: 12px; color: #aaa; }
+    .ctrl-row input { flex: 1; min-width: 100px; }
+    .builder-top { margin-bottom: 12px; }
+    .field-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .field-row input { flex: 1; }
+    .builder-hint { font-size: 11px; color: #888; margin: 6px 0 10px; }
+    .steps-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; font-weight: 500; }
+    .step-editor { background: #1a1a20; border-radius: 6px; padding: 12px; margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+    .step-editor-title { font-weight: 600; color: #4f46e5; }
+    .edit-row { display: flex; gap: 10px; }
+    .edit-row > div { flex: 1; }
+    .edit-row label { display: block; font-size: 11px; color: #aaa; margin-bottom: 3px; }
+    .api-hint { font-size: 11px; color: #666; margin-top: 12px; padding-top: 10px; border-top: 1px solid #222; }
+    .api-hint code { background: #222; padding: 2px 5px; border-radius: 3px; }
+    .logs-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <span class="logo">⚡ BotForge</span>
+    <span class="status-dot" id="statusDot"></span>
+    <span class="status-text" id="statusText">Connecting...</span>
+  </div>
+  <div class="header-right">
+    <span class="running-badge" id="runningBadge" style="display:none">● RUNNING</span>
+  </div>
+</header>
+
+<main>
+  <!-- LEFT: Live Browser View -->
+  <section class="panel-left">
+    <div class="panel-title">
+      <span>🖥 Live Browser</span>
+      <div class="url-bar-wrap">
+        <input type="text" id="urlBar" placeholder="https://..." />
+        <button onclick="navigate()" class="btn-sm">Go</button>
+      </div>
+    </div>
+
+    <div class="browser-view" id="browserView">
+      <img id="liveFrame" src="/screenshot" alt="Browser" draggable="false" />
+      <div class="click-overlay" id="clickOverlay"></div>
+      <div class="builder-markers" id="builderMarkers"></div>
+    </div>
+
+    <div class="browser-controls">
+      <div class="ctrl-row">
+        <label class="ctrl-label">Manual Input</label>
+        <input type="text" id="manualInput" placeholder="Type and press Enter to send..." />
+        <button onclick="sendManualKey('Enter')" class="btn-sm">↵</button>
+        <button onclick="sendManualKey('Backspace')" class="btn-sm">⌫</button>
+      </div>
+      <div class="ctrl-row">
+        <button onclick="sendScroll(-300)" class="btn-sm">↑ Scroll Up</button>
+        <button onclick="sendScroll(300)" class="btn-sm">↓ Scroll Down</button>
+        <button onclick="refreshScreenshot()" class="btn-sm">⟳ Refresh</button>
+        <label class="toggle-wrap">
+          <input type="checkbox" id="liveToggle" checked onchange="toggleLive(this.checked)" />
+          Auto-refresh
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Control Panel -->
+  <section class="panel-right">
+    <div class="tabs">
+      <button class="tab active" data-tab="automation">🤖 Automation</button>
+      <button class="tab" data-tab="builder">🛠 Builder</button>
+      <button class="tab" data-tab="logs">📋 Logs</button>
+    </div>
+
+    <!-- AUTOMATION TAB -->
+    <div class="tab-content active" id="tab-automation">
+      <div class="field-group">
+        <label>Profile</label>
+        <select id="profileSelect"></select>
+      </div>
+      <div class="field-group">
+        <label>Prompt</label>
+        <textarea id="promptInput" rows="4" placeholder="Type your prompt here..."></textarea>
+      </div>
+      <div class="btn-row">
+        <button id="runBtn" class="btn-primary" onclick="runAutomation()">▶ Run</button>
+        <button id="stopBtn" class="btn-danger" onclick="stopAutomation()" disabled>⏹ Stop</button>
+      </div>
+
+      <div class="progress-bar-wrap" id="progressWrap" style="display:none">
+        <div class="progress-bar" id="progressBar"></div>
+        <span class="progress-label" id="progressLabel"></span>
+      </div>
+
+      <div class="field-group">
+        <label>Response Output</label>
+        <div class="response-box" id="responseBox">
+          <em>Response will appear here...</em>
+        </div>
+        <button onclick="copyResponse()" class="btn-sm" style="margin-top:6px">📋 Copy Response</button>
+      </div>
+
+      <div class="api-hint">
+        <strong>API:</strong> <code>POST /ask</code> with <code>{"message":"...", "profile":"..."}</code>
+      </div>
+    </div>
+
+    <!-- BUILDER TAB -->
+    <div class="tab-content" id="tab-builder">
+      <div class="builder-top">
+        <div class="field-row">
+          <input type="text" id="builderName" placeholder="Profile name" />
+          <input type="text" id="builderUrl" placeholder="https://..." />
+        </div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="saveBuilderProfile()">💾 Save Profile</button>
+          <button class="btn-sm" onclick="loadBuilderProfile()">📂 Load</button>
+          <button class="btn-danger btn-sm" onclick="deleteBuilderProfile()">🗑 Delete</button>
+        </div>
+        <div class="builder-hint">
+          Click on the live browser view (left) to add a step at that position. Drag steps to reorder.
+        </div>
+      </div>
+
+      <div class="steps-header">
+        <span>Steps</span>
+        <button class="btn-sm" onclick="addManualStep()">+ Add Step</button>
+      </div>
+      <div id="stepsList" class="steps-list"></div>
+
+      <div id="stepEditor" class="step-editor" style="display:none">
+        <div class="step-editor-title">Edit Step <span id="editStepNum"></span></div>
+        <div class="field-group">
+          <label>Action</label>
+          <select id="editAction" onchange="renderStepEditorFields()">
+            <option value="click">click</option>
+            <option value="type">type</option>
+            <option value="send">send</option>
+            <option value="keypress">keypress</option>
+            <option value="scroll">scroll</option>
+            <option value="wait">wait</option>
+            <option value="waitSelector">waitSelector</option>
+            <option value="waitSelectorGone">waitSelectorGone</option>
+            <option value="copy">copy</option>
+            <option value="read">read</option>
+            <option value="navigate">navigate</option>
+            <option value="evaluate">evaluate</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Label</label>
+          <input type="text" id="editLabel" placeholder="Step description" />
+        </div>
+        <div id="editActionFields"></div>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="saveStepEdit()">✓ Save Step</button>
+          <button class="btn-sm" onclick="closeStepEditor()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOGS TAB -->
+    <div class="tab-content" id="tab-logs">
+      <div class="logs-toolbar">
+        <button class="btn-sm" onclick="clearLogs()">🗑 Clear</button>
+        <label class="toggle-wrap">
+          <input type="checkbox" id="autoScrollLog" checked />
+          Auto-scroll
+        </label>
+      </div>
+      <div id="logBox" class="log-box"></div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
