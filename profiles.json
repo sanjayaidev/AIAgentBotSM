@@ -1,0 +1,24 @@
+[
+  {
+    "name": "DeepSeek Send",
+    "url": "https://chat.deepseek.com",
+    "steps": [
+      { "id": 1, "action": "click", "x": 443, "y": 558, "label": "Click textarea" },
+      { "id": 2, "action": "type", "text": "{{prompt}}", "delay": 30, "label": "Type prompt" },
+      { "id": 3, "action": "wait", "ms": 1000, "label": "Wait" },
+      { "id": 4, "action": "send", "text": "", "delay": 30, "label": "Send message (Enter)" }
+    ]
+  },
+  {
+    "name": "Qwen Send",
+    "url": "https://tongyi.aliyun.com/qianwen/",
+    "steps": [
+      { "id": 1, "action": "click", "x": 640, "y": 650, "label": "Click input" },
+      { "id": 2, "action": "type", "text": "{{prompt}}", "delay": 30, "label": "Type prompt" },
+      { "id": 3, "action": "wait", "ms": 400, "label": "Pause" },
+      { "id": 4, "action": "send", "text": "", "delay": 30, "label": "Send via Enter" },
+      { "id": 5, "action": "wait", "ms": 5000, "label": "Wait for response" },
+      { "id": 6, "action": "copy", "selector": "[class*=\"message\"]:last-child", "label": "Copy response" }
+    ]
+  }
+]

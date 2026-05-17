@@ -1,0 +1,13 @@
+{
+  "name": "deepseek-bot",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2",
+    "puppeteer": "^24.43.1",
+    "puppeteer-core": "^24.43.1"
+  }
+}
