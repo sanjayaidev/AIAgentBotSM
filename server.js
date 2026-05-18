@@ -265,9 +265,12 @@ function requireApiKey(req, res, next) {
 }
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+const STATIC_ROOT = fs.existsSync(path.join(__dirname, 'public'))
+  ? path.join(__dirname, 'public')
+  : path.join(__dirname);
+app.use(express.static(STATIC_ROOT));
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(STATIC_ROOT, 'index.html'));
 });
 
 let browser = null;
