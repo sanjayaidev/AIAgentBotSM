@@ -3,12 +3,179 @@ const express = require('express');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { Client } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
+const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.PG_CONNECTION_STRING;
+const USE_POSTGRES = Boolean(DATABASE_URL);
+const API_KEY = process.env.API_KEY || process.env.BOT_API_KEY || '';
+const EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.CHROME_PATH;
 const puppeteerExtra = require('puppeteer-extra');
 const stealth = require('puppeteer-extra-plugin-stealth');
-const fs = require('fs');
 puppeteerExtra.use(stealth());
+let dbClient = null;
+
+async function initDatabase() {
+  if (!USE_POSTGRES) return;
+  dbClient = new Client({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  await dbClient.connect();
+  await dbClient.query(`
+    CREATE TABLE IF NOT EXISTS profiles (
+      slug text PRIMARY KEY,
+      name text NOT NULL,
+      url text,
+      steps jsonb NOT NULL,
+      created_at timestamptz DEFAULT now(),
+      updated_at timestamptz DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      profile_name text PRIMARY KEY,
+      cookies jsonb NOT NULL,
+      storage jsonb NOT NULL,
+      updated_at timestamptz DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS runs (
+      id serial PRIMARY KEY,
+      profile_slug text,
+      profile_name text,
+      prompt text,
+      result text,
+      status text,
+      error text,
+      duration_ms int,
+      created_at timestamptz DEFAULT now()
+    );
+  `);
+}
+
+async function ensureProfileStore() {
+  if (USE_POSTGRES) {
+    const { rows } = await dbClient.query('SELECT count(*)::int AS count FROM profiles');
+    if (rows[0].count === 0) {
+      await saveProfiles(getDefaultProfiles());
+    }
+  } else if (!fs.existsSync(PROFILES_FILE)) {
+    await saveProfiles(getDefaultProfiles());
+  }
+}
+
+async function loadProfilesFromDb() {
+  const result = await dbClient.query('SELECT slug, name, url, steps FROM profiles ORDER BY name');
+  return assignProfileSlugs(result.rows.map(row => ({
+    slug: row.slug,
+    name: row.name,
+    url: row.url,
+    steps: row.steps || []
+  })));
+}
+
+async function saveProfilesToDb(profiles) {
+  const sanitized = profiles.map(profile => ({ ...profile, slug: slugify(profile.name) }));
+  await dbClient.query('BEGIN');
+  try {
+    for (const profile of sanitized) {
+      await dbClient.query(
+        `INSERT INTO profiles (slug, name, url, steps, updated_at)
+         VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (slug) DO UPDATE
+         SET name = EXCLUDED.name, url = EXCLUDED.url, steps = EXCLUDED.steps, updated_at = now()`,
+        [profile.slug, profile.name, profile.url, profile.steps]
+      );
+    }
+    const slugs = sanitized.map(p => p.slug);
+    if (slugs.length) {
+      const placeholders = slugs.map((_, i) => `$${i + 1}`).join(',');
+      await dbClient.query(`DELETE FROM profiles WHERE slug NOT IN (${placeholders})`, slugs);
+    } else {
+      await dbClient.query('DELETE FROM profiles');
+    }
+    await dbClient.query('COMMIT');
+  } catch (err) {
+    await dbClient.query('ROLLBACK');
+    throw err;
+  }
+}
+
+async function loadSessionFromDb(profileName) {
+  const result = await dbClient.query('SELECT cookies, storage FROM sessions WHERE profile_name = $1', [profileName]);
+  return result.rows[0] || null;
+}
+
+async function saveSessionToDb(profileName, cookies, storage) {
+  await dbClient.query(
+    `INSERT INTO sessions (profile_name, cookies, storage, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (profile_name) DO UPDATE SET cookies = EXCLUDED.cookies, storage = EXCLUDED.storage, updated_at = now()`,
+    [profileName, cookies, storage]
+  );
+}
+
+async function recordRunHistory({ profileSlug, profileName, prompt, result, status, error, durationMs }) {
+  if (!USE_POSTGRES || !dbClient) return;
+  try {
+    await dbClient.query(
+      `INSERT INTO runs (profile_slug, profile_name, prompt, result, status, error, duration_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [profileSlug, profileName, prompt, result, status, error, durationMs]
+    );
+  } catch (e) {
+    log(`Run history save failed: ${e.message}`, 'warn');
+  }
+}
+
+function slugify(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function assignProfileSlugs(profiles) {
+  const seen = new Map();
+  return profiles.map(profile => {
+    const base = slugify(profile.name || 'profile');
+    let slug = base || 'profile';
+    let suffix = 1;
+    while (seen.has(slug)) {
+      slug = `${base}-${suffix++}`;
+    }
+    seen.set(slug, true);
+    return { ...profile, slug };
+  });
+}
+
+async function getProfileBySlug(slug) {
+  const profiles = await loadProfiles();
+  return profiles.find(p => p.slug === slug || p.name === slug);
+}
+
+function getDefaultProfiles() {
+  return assignProfileSlugs([
+    {
+      name: 'DeepSeek Send',
+      url: 'https://chat.deepseek.com',
+      steps: [
+        { id: 1, action: 'click', x: 443, y: 558, label: 'Click textarea' },
+        { id: 2, action: 'type', text: '{{prompt}}', delay: 30, label: 'Type prompt' },
+        { id: 3, action: 'wait', ms: 1000, label: 'Wait' },
+        { id: 4, action: 'send', text: '', delay: 30, label: 'Send message (Enter)' }
+      ]
+    },
+    {
+      name: 'Qwen Send',
+      url: 'https://tongyi.aliyun.com/qianwen/',
+      steps: [
+        { id: 1, action: 'click', x: 640, y: 650, label: 'Click input' },
+        { id: 2, action: 'type', text: '{{prompt}}', delay: 30, label: 'Type prompt' },
+        { id: 3, action: 'wait', ms: 400, label: 'Pause' },
+        { id: 4, action: 'send', text: '', delay: 30, label: 'Send via Enter' },
+        { id: 5, action: 'wait', ms: 5000, label: 'Wait for response' },
+        { id: 6, action: 'copy', selector: '[class*=\"message\"]:last-child', label: 'Copy response', polling: true }
+      ]
+    }
+  ]);
+}
 
 // Session storage path
 const SESSION_DIR = path.join(__dirname, 'sessions');
@@ -17,27 +184,50 @@ if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR);
 async function saveSession(profileName) {
   const cookies = await page.cookies();
   const storage = await page.evaluate(() => ({
-    local: JSON.stringify(localStorage),
-    session: JSON.stringify(sessionStorage)
+    local: Object.fromEntries(Object.entries(localStorage)),
+    session: Object.fromEntries(Object.entries(sessionStorage))
   }));
+
+  if (USE_POSTGRES) {
+    try {
+      await saveSessionToDb(profileName, cookies, storage);
+      log(`💾 Session saved to DB for ${profileName}`);
+      return;
+    } catch (e) {
+      log(`DB session save failed: ${e.message}`, 'warn');
+    }
+  }
+
   fs.writeFileSync(
     path.join(SESSION_DIR, `${profileName.replace(/\s+/g, '_')}.json`),
-    JSON.stringify({ cookies, storage })
+    JSON.stringify({ cookies, storage }, null, 2)
   );
   log(`💾 Session saved for ${profileName}`);
 }
 
 async function loadSession(profileName) {
-  const sessionFile = path.join(SESSION_DIR, `${profileName.replace(/\s+/g, '_')}.json`);
-  if (!fs.existsSync(sessionFile)) return false;
-  
-  const { cookies, storage } = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
-  await page.setCookie(...cookies);
-  await page.evaluateOnNewDocument(`
-    const data = ${JSON.stringify(storage)};
-    Object.keys(data.local).forEach(k => localStorage.setItem(k, data.local[k]));
-    Object.keys(data.session).forEach(k => sessionStorage.setItem(k, data.session[k]));
-  `);
+  let data = null;
+
+  if (USE_POSTGRES) {
+    try {
+      data = await loadSessionFromDb(profileName);
+    } catch (e) {
+      log(`DB session load failed: ${e.message}`, 'warn');
+    }
+  }
+
+  if (!data) {
+    const sessionFile = path.join(SESSION_DIR, `${profileName.replace(/\s+/g, '_')}.json`);
+    if (!fs.existsSync(sessionFile)) return false;
+    data = JSON.parse(fs.readFileSync(sessionFile, 'utf8'));
+  }
+
+  if (!data || !Array.isArray(data.cookies) || !data.storage) return false;
+  await page.setCookie(...data.cookies);
+  await page.evaluateOnNewDocument(storage => {
+    Object.entries(storage.local || {}).forEach(([key, value]) => localStorage.setItem(key, value));
+    Object.entries(storage.session || {}).forEach(([key, value]) => sessionStorage.setItem(key, value));
+  }, data.storage);
   log(`🔓 Session loaded for ${profileName}`);
   return true;
 }
@@ -49,15 +239,35 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
-// ✅ Serve static files with explicit paths
-app.use('/css', express.static(path.join(__dirname, 'css')));
-app.use('/js', express.static(path.join(__dirname, 'js')));
-app.use(express.static(__dirname));
+function sameOrigin(req) {
+  const origin = req.headers.origin || req.headers.referer;
+  if (!origin) return false;
+  try {
+    const originUrl = new URL(origin);
+    const host = req.headers.host;
+    return originUrl.host === host;
+  } catch (_) {
+    return false;
+  }
+}
 
-// ✅ Explicit root route for Replit
+function getApiKeyFromRequest(req) {
+  const auth = req.headers.authorization;
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return req.headers['x-api-key'] || req.query.api_key || '';
+}
+
+function requireApiKey(req, res, next) {
+  if (!API_KEY || sameOrigin(req)) return next();
+  const key = getApiKeyFromRequest(req);
+  if (key === API_KEY) return next();
+  return res.status(401).json({ error: 'API key required' });
+}
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 let browser = null;
@@ -80,39 +290,22 @@ function log(message, level = 'info') {
   broadcast('log', { message, level, time: new Date().toISOString() });
 }
 
-function getDefaultProfiles() {
-  return [
-    {
-      name: 'DeepSeek Send',
-      url: 'https://chat.deepseek.com',
-      steps: [
-        { id: 1, action: 'click', x: 443, y: 558, label: 'Click textarea' },
-        { id: 2, action: 'type', text: '{{prompt}}', delay: 30, label: 'Type prompt' },
-        { id: 3, action: 'wait', ms: 1000, label: 'Wait' },
-        { id: 4, action: 'send', text: '', delay: 30, label: 'Send message (Enter)' }
-      ]
-    },
-    {
-      name: 'Qwen Send',
-      url: 'https://tongyi.aliyun.com/qianwen/',
-      steps: [
-        { id: 1, action: 'click', x: 640, y: 650, label: 'Click input' },
-        { id: 2, action: 'type', text: '{{prompt}}', delay: 30, label: 'Type prompt' },
-        { id: 3, action: 'wait', ms: 400, label: 'Pause' },
-        { id: 4, action: 'send', text: '', delay: 30, label: 'Send via Enter' },
-        { id: 5, action: 'wait', ms: 5000, label: 'Wait for response' },
-        { id: 6, action: 'copy', selector: '[class*="message"]:last-child', label: 'Copy response' }
-      ]
+async function loadProfiles() {
+  if (USE_POSTGRES) {
+    try {
+      const profiles = await loadProfilesFromDb();
+      if (profiles.length) return profiles;
+    } catch (e) {
+      log(`DB profile load failed: ${e.message}`, 'error');
     }
-  ];
-}
+  }
 
-function loadProfiles() {
   try {
     if (fs.existsSync(PROFILES_FILE)) {
       let raw = fs.readFileSync(PROFILES_FILE, 'utf8');
       raw = raw.replace(/"(\w+)\s*"\s*:/g, '"$1":');
-      return JSON.parse(raw);
+      const profiles = JSON.parse(raw);
+      return assignProfileSlugs(Array.isArray(profiles) ? profiles : []);
     }
   } catch (e) {
     log(`Error loading profiles: ${e.message}`, 'error');
@@ -120,25 +313,32 @@ function loadProfiles() {
   return getDefaultProfiles();
 }
 
-function saveProfiles(profiles) {
-  fs.writeFileSync(PROFILES_FILE, JSON.stringify(profiles, null, 2));
+async function saveProfiles(profiles) {
+  const sanitized = profiles.map(profile => ({ ...profile, slug: slugify(profile.name) }));
+  if (USE_POSTGRES) {
+    try {
+      await saveProfilesToDb(sanitized);
+      return;
+    } catch (e) {
+      log(`DB profile save failed: ${e.message}`, 'error');
+    }
+  }
+  fs.writeFileSync(PROFILES_FILE, JSON.stringify(sanitized, null, 2));
 }
 
 const UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
 function getChromiumPath() {
-  // ✅ Render/Docker environment
+  if (EXECUTABLE_PATH) {
+    return EXECUTABLE_PATH;
+  }
   if (process.env.RENDER) {
     return '/usr/bin/chromium';
   }
-  
-  // Replit/Nix fallback
   try {
     const nixPath = execSync('ls -d /nix/store/*chromium-* 2>/dev/null | head -n 1').toString().trim();
     if (nixPath) return `${nixPath}/bin/chromium`;
   } catch (_) {}
-  
-  // Local/Linux fallback
   const candidates = ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable'];
   for (const cmd of candidates) {
     try {
@@ -187,11 +387,6 @@ async function executeStep(step, context) {
   const label = step.label ? `[${step.label}]` : '';
   try {
     switch (step.action) {
-      case 'navigate':
-        log(`Navigate → ${step.url}${label}`);
-        await p.goto(step.url, { waitUntil: 'networkidle2', timeout: 30000 });
-        break;
-
       case 'click':
         if (step.selector) {
           await p.click(step.selector);
@@ -214,7 +409,6 @@ async function executeStep(step, context) {
         log(`Key: ${step.key || 'Enter'}${label}`);
         break;
 
-      // ✅ FIXED: Send action - types optional text THEN presses Enter (matches manual UI)
       case 'send': {
         const text = (step.text || '').replace(/\{\{prompt\}\}/g, context.prompt || '');
         const delay = step.delay || 30;
@@ -235,6 +429,16 @@ async function executeStep(step, context) {
         await p.mouse.wheel({ deltaX: Number(step.deltaX || 0), deltaY: Number(step.deltaY || 300) });
         break;
 
+      case 'goto':
+        step.action = 'navigate';
+        /* falls through */
+
+      case 'navigate':
+        if (!step.url) throw new Error('Missing URL for navigate/goto step');
+        log(`Navigate → ${step.url}${label}`);
+        await p.goto(step.url, { waitUntil: 'networkidle2', timeout: 30000 });
+        break;
+
       case 'wait':
         log(`Wait ${step.ms || 1000}ms ${label}`);
         await new Promise(r => setTimeout(r, Number(step.ms || 1000)));
@@ -252,44 +456,55 @@ async function executeStep(step, context) {
         break;
 
       case 'copy': {
-  log(`Copy: ${step.selector}${label}`);
-  const selectors = (step.selector || '').split(',').map(s => s.trim());
-  let text = '';
-  let attempts = 0;
-  const maxAttempts = step.polling ? 10 : 1;
+        log(`Copy action${label}`);
+        if (step.selector || step.x !== undefined || step.y !== undefined) {
+          if (step.selector) {
+            log(`Clicking copy selector: ${step.selector}${label}`);
+            await p.click(step.selector);
+          } else {
+            log(`Clicking copy position: (${step.x}, ${step.y})${label}`);
+            await p.mouse.click(Number(step.x || 0), Number(step.y || 0));
+          }
+          await new Promise(r => setTimeout(r, Number(step.waitMs || 600)));
+        }
 
-  while (attempts < maxAttempts) {
-    for (const sel of selectors) {
-      try {
-        text = await p.evaluate(s => {
-          // Fallback chain: innerText → textContent → data attribute → JSON-LD
-          const els = document.querySelectorAll(s);
-          if (!els.length) return '';
-          const el = els[els.length - 1];
-          return el.innerText || el.textContent || 
-                 el.getAttribute('data-response') || 
-                 JSON.stringify(el.querySelector('pre, code, .markdown')?.innerText || '').slice(1, -1);
-        }, sel);
-        if (text.trim().length > 10) break; // Found substantial text
-      } catch (_) {}
-    }
-    if (text.trim() && !step.polling) break;
-    attempts++;
-    await new Promise(r => setTimeout(r, 1500)); // Poll streaming response
-  }
-  
-  // Clean AI artifacts (citations, markdown wrappers, loading states)
-  text = text
-    .replace(/【.*?】/g, '')          // Remove citation markers
-    .replace(/\[citation:\d+\]/g, '') // Remove [citation:1]
-    .replace(/^(Waiting for|Generating|Typing...).*$/gm, '')
-    .trim();
+        const rawSelectors = (step.targetSelector || step.extractSelector || step.selector || '').split(',').map(s => s.trim()).filter(Boolean);
+        let text = '';
+        let attempts = 0;
+        const maxAttempts = step.polling ? 10 : 1;
 
-  context.result = text;
-  log(`✅ Copied ${text.length} chars`);
-  broadcast('response', { text });
-  break;
-}
+        while (attempts < maxAttempts) {
+          if (rawSelectors.length) {
+            for (const sel of rawSelectors) {
+              try {
+                text = await p.evaluate(s => {
+                  const els = document.querySelectorAll(s);
+                  if (!els.length) return '';
+                  const el = els[els.length - 1];
+                  return el.innerText || el.textContent || el.getAttribute('data-response') || '';
+                }, sel);
+                if (text.trim().length > 10) break;
+              } catch (_) {}
+            }
+          } else {
+            text = await p.evaluate(() => document.body.innerText || '');
+          }
+          if (text.trim() && !step.polling) break;
+          attempts++;
+          await new Promise(r => setTimeout(r, 1500));
+        }
+
+        text = text
+          .replace(/【.*?】/g, '')
+          .replace(/\[citation:\d+\]/g, '')
+          .replace(/^(Waiting for|Generating|Typing...).*$/gm, '')
+          .trim();
+
+        context.result = text;
+        log(`✅ Copied ${text.length} chars`);
+        broadcast('response', { text });
+        break;
+      }
 
       case 'read': {
         log(`Read${step.selector ? ' selector: ' + step.selector : ' at (' + step.x + ',' + step.y + ')'}${label}`);
@@ -331,12 +546,13 @@ async function executeStep(step, context) {
 }
 
 async function runProfile(profileName, prompt) {
-  const profiles = loadProfiles();
+  const profiles = await loadProfiles();
   const profile = profiles.find(p => p.name === profileName);
   if (!profile) throw new Error(`Profile not found: ${profileName}`);
 
-  isRunning = true;
-  shouldStop = false;
+  const runStart = Date.now();
+  let runStatus = 'success';
+  let runError = null;
   const context = { prompt, result: '' };
   try {
     log(`▶ Starting: ${profileName}`);
@@ -363,9 +579,22 @@ if (profile.url) {
     }
     log(`✓ Automation complete`);
     return context.result;
+  } catch (err) {
+    runStatus = 'failed';
+    runError = err.message;
+    throw err;
   } finally {
     isRunning = false;
     broadcast('status', { running: false });
+    await recordRunHistory({
+      profileSlug: profile.slug,
+      profileName: profile.name,
+      prompt,
+      result: context.result,
+      status: runStatus,
+      error: runError,
+      durationMs: Date.now() - runStart
+    });
   }
 }
 
@@ -498,40 +727,92 @@ app.post('/browser/evaluate', async (req, res) => {
 });
 
 // Profiles
-app.get('/profiles', (req, res) => res.json(loadProfiles()));
-app.post('/profiles', (req, res) => {
-  const profiles = loadProfiles();
-  const { name, url, steps } = req.body;
-  const idx = profiles.findIndex(p => p.name === name);
-  if (idx >= 0) profiles[idx] = { name, url, steps };
-  else profiles.push({ name, url, steps });
-  saveProfiles(profiles);
-  res.json({ ok: true });
+app.get('/profiles', async (req, res) => {
+  try {
+    const profiles = await loadProfiles();
+    res.json(profiles);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
-app.delete('/profiles/:name', (req, res) => {
-  let profiles = loadProfiles();
-  profiles = profiles.filter(p => p.name !== decodeURIComponent(req.params.name));
-  saveProfiles(profiles);
-  res.json({ ok: true });
+app.post('/profiles', requireApiKey, async (req, res) => {
+  try {
+    const profiles = await loadProfiles();
+    const { name, url, steps } = req.body;
+    if (!name) return res.status(400).json({ error: 'Profile name is required' });
+    const sanitized = { name, url, steps, slug: slugify(name) };
+    const idx = profiles.findIndex(p => p.name === name || p.slug === sanitized.slug);
+    if (idx >= 0) profiles[idx] = sanitized;
+    else profiles.push(sanitized);
+    await saveProfiles(profiles);
+    res.json({ ok: true, slug: sanitized.slug });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.delete('/profiles/:name', requireApiKey, async (req, res) => {
+  try {
+    let profiles = await loadProfiles();
+    const target = decodeURIComponent(req.params.name);
+    profiles = profiles.filter(p => p.name !== target && p.slug !== target);
+    await saveProfiles(profiles);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
+async function runProfileBySlug(slug, prompt) {
+  const profile = await getProfileBySlug(slug);
+  if (!profile) throw new Error(`Profile not found: ${slug}`);
+  return runProfile(profile.name, prompt);
+}
+
 // Automation
-app.post('/run', async (req, res) => {
+app.post('/run', requireApiKey, async (req, res) => {
   if (isRunning) return res.status(409).json({ error: 'Already running' });
   const { profile, prompt } = req.body;
+  if (!profile) return res.status(400).json({ error: 'profile required' });
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
   runProfile(profile, prompt)
     .then(result => broadcast('done', { result }))
     .catch(e => { log(`Error: ${e.message}`, 'error'); broadcast('error', { message: e.message }); });
   res.json({ ok: true });
 });
 
-app.post('/stop', (req, res) => {
+app.post('/run/:slug', requireApiKey, async (req, res) => {
+  if (isRunning) return res.status(409).json({ error: 'Already running' });
+  const slug = decodeURIComponent(req.params.slug);
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  try {
+    const reply = await runProfileBySlug(slug, prompt);
+    res.json({ ok: true, reply });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/run/:slug', requireApiKey, async (req, res) => {
+  if (isRunning) return res.status(409).json({ error: 'Already running' });
+  const slug = decodeURIComponent(req.params.slug);
+  const prompt = req.query.prompt || '';
+  if (!prompt) return res.status(400).json({ error: 'prompt query required' });
+  try {
+    const reply = await runProfileBySlug(slug, prompt);
+    res.json({ ok: true, reply });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/stop', requireApiKey, (req, res) => {
   shouldStop = true;
   log('Stop requested', 'warn');
   res.json({ ok: true });
 });
 
-app.post('/ask', async (req, res) => {
+app.post('/ask', requireApiKey, async (req, res) => {
   const { message, profile = 'DeepSeek Send' } = req.body;
   if (!message) return res.status(400).json({ error: 'message required' });
   if (isRunning) return res.status(409).json({ error: 'Bot is busy' });
@@ -549,6 +830,76 @@ app.get('/status', (req, res) => {
   });
 });
 
+app.get('/endpoints', requireApiKey, async (req, res) => {
+  try {
+    const endpoints = (await loadProfiles()).map(profile => ({
+      name: profile.name,
+      slug: profile.slug,
+      endpoint: `/run/${profile.slug}`,
+      description: profile.label || profile.name,
+      url: profile.url || null
+    }));
+    res.json({ endpoints, docs: {
+      run: 'POST /run/{slug} with {"prompt":"..."}',
+      runGet: 'GET /run/{slug}?prompt=...'
+    } });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/history', requireApiKey, async (req, res) => {
+  if (!USE_POSTGRES) return res.status(404).json({ error: 'History is not enabled without DATABASE_URL' });
+  const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+  try {
+    const result = await dbClient.query(
+      'SELECT id, profile_slug, profile_name, prompt, result, status, error, duration_ms, created_at FROM runs ORDER BY created_at DESC LIMIT $1',
+      [limit]
+    );
+    res.json({ history: result.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/docs', async (req, res) => {
+  try {
+    const endpoints = (await loadProfiles()).map(profile => ({
+      name: profile.name,
+      slug: profile.slug,
+      endpoint: `/run/${profile.slug}`,
+      url: profile.url || 'n/a'
+    }));
+    const docsHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BotForge API Docs</title>
+  <style>body{font-family:system-ui,sans-serif;background:#0f0f12;color:#e0e0e0;padding:24px;}pre,code{background:#111;color:#9ece6a;padding:4px 8px;border-radius:4px;}table{width:100%;border-collapse:collapse;margin-top:16px;}th,td{padding:10px;border:1px solid #222;text-align:left;}th{background:#15151a;}</style>
+</head>
+<body>
+  <h1>BotForge API Docs</h1>
+  <p>Use <code>x-api-key</code> or <code>?api_key=...</code> when <strong>API_KEY</strong> is configured.</p>
+  <h2>Endpoints</h2>
+  <ul>
+    <li><code>POST /run/{slug}</code> with JSON <code>{"prompt":"..."}</code></li>
+    <li><code>GET /run/{slug}?prompt=...</code></li>
+    <li><code>GET /endpoints</code></li>
+    <li><code>GET /history?limit=20</code> (requires DB)</li>
+  </ul>
+  <h2>Saved flows</h2>
+  <table><thead><tr><th>Name</th><th>Slug</th><th>Endpoint</th><th>URL</th></tr></thead><tbody>
+    ${endpoints.map(e => `<tr><td>${e.name}</td><td>${e.slug}</td><td><code>${e.endpoint}</code></td><td>${e.url}</td></tr>`).join('')}
+  </tbody></table>
+</body>
+</html>`;
+    res.send(docsHtml);
+  } catch (e) {
+    res.status(500).send(`<pre>Docs load failed: ${e.message}</pre>`);
+  }
+});
+
 // SSE Logs
 app.get('/logs/stream', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -562,7 +913,8 @@ app.get('/logs/stream', (req, res) => {
 
 // Start Server
 (async () => {
-  if (!fs.existsSync(PROFILES_FILE)) saveProfiles(getDefaultProfiles());
+  await initDatabase();
+  await ensureProfileStore();
   await ensurePage();
   log('Browser ready');
   app.listen(PORT, '0.0.0.0', () => log(`Server running on port ${PORT}`));

@@ -147,6 +147,14 @@
         <select id="profileSelect"></select>
       </div>
       <div class="field-group">
+        <label>Endpoint</label>
+        <div id="profileEndpoint" class="response-box" style="min-height:28px; max-height:48px; white-space:normal;">/run/<em>profile-slug</em></div>
+      </div>
+      <div class="field-group">
+        <label>Endpoint docs</label>
+        <div id="endpointsList" class="response-box" style="min-height:60px; max-height:150px; white-space:pre-wrap;">Loading endpoints...</div>
+      </div>
+      <div class="field-group">
         <label>Prompt</label>
         <textarea id="promptInput" rows="4" placeholder="Type your prompt here..."></textarea>
       </div>
@@ -169,7 +177,12 @@
       </div>
 
       <div class="api-hint">
-        <strong>API:</strong> <code>POST /ask</code> with <code>{"message":"...", "profile":"..."}</code>
+        <strong>API:</strong>
+        <div><code>POST /run/{slug}</code> with <code>{"prompt":"..."}</code></div>
+        <div><code>GET /run/{slug}?prompt=...</code></div>
+        <div><code>GET /endpoints</code> to list saved flow endpoints</div>
+        <div><code>GET /history?limit=20</code> to view run history (DB only)</div>
+        <div><a href="/docs" target="_blank" style="color:#8b5cf6; text-decoration:none">Open API docs</a></div>
       </div>
     </div>
 
@@ -179,6 +192,23 @@
         <div class="field-row">
           <input type="text" id="builderName" placeholder="Profile name" />
           <input type="text" id="builderUrl" placeholder="https://..." />
+        </div>
+        <div class="field-row">
+          <label style="flex:1; font-size:12px; color:#aaa;">
+            Default action
+            <select id="builderDefaultAction" style="width:100%; margin-top:4px;">
+              <option value="click">click</option>
+              <option value="copy">copy</option>
+              <option value="read">read</option>
+              <option value="goto">goto</option>
+              <option value="navigate">navigate</option>
+              <option value="type">type</option>
+              <option value="send">send</option>
+              <option value="wait">wait</option>
+              <option value="waitSelector">waitSelector</option>
+              <option value="waitSelectorGone">waitSelectorGone</option>
+            </select>
+          </label>
         </div>
         <div class="btn-row">
           <button class="btn-primary" onclick="saveBuilderProfile()">💾 Save Profile</button>
@@ -211,6 +241,7 @@
             <option value="waitSelectorGone">waitSelectorGone</option>
             <option value="copy">copy</option>
             <option value="read">read</option>
+            <option value="goto">goto</option>
             <option value="navigate">navigate</option>
             <option value="evaluate">evaluate</option>
           </select>

@@ -6,6 +6,7 @@ let selectedStepIdx = null;
 let isRunning = false;
 let liveInterval = null;
 let builderMode = false;
+let builderDefaultAction = 'click';
 let sse = null;
 let sortable = null;
 
@@ -21,6 +22,10 @@ window.addEventListener('DOMContentLoaded', () => {
   setupClickOverlay();
   setupManualInput();
   updateUrl();
+  document.getElementById('profileSelect').addEventListener('change', () => {
+    const profile = profiles.find(p => p.name === document.getElementById('profileSelect').value);
+    if (profile) updateProfileEndpoint(profile);
+  });
 });
 
 // ── TABS ──────────────────────────────────────────────────
@@ -235,9 +240,37 @@ async function loadProfiles() {
     const r = await fetch('/profiles');
     profiles = await r.json();
     renderProfileSelect();
-    if (profiles.length) loadBuilderFromProfile(profiles[0]);
+    if (profiles.length) {
+      loadBuilderFromProfile(profiles[0]);
+      updateProfileEndpoint(profiles[0]);
+    }
+    await loadEndpointDocs();
   } catch (e) {
     addLog('Failed to load profiles: ' + e.message, 'error');
+  }
+}
+
+function updateProfileEndpoint(profile) {
+  const endpoint = profile?.slug ? `/run/${profile.slug}` : '/run/<profile-slug>';
+  const el = document.getElementById('profileEndpoint');
+  if (el) el.textContent = endpoint;
+}
+
+async function loadEndpointDocs() {
+  const el = document.getElementById('endpointsList');
+  if (!el) return;
+  try {
+    const r = await fetch('/endpoints');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Failed to load docs');
+    if (!data.endpoints || !data.endpoints.length) {
+      el.textContent = 'No saved endpoints found.';
+      return;
+    }
+    el.textContent = data.endpoints.map(item => `${item.name} → ${item.endpoint}${item.url ? ` (starts ${item.url})` : ''}`).join('\n');
+  } catch (e) {
+    el.textContent = 'Unable to load endpoint docs.';
+    addLog('Failed to load endpoint docs: ' + e.message, 'error');
   }
 }
 
@@ -248,6 +281,8 @@ function renderProfileSelect() {
     `<option value="${escHtml(p.name)}">${escHtml(p.name)}</option>`
   ).join('');
   if (cur && profiles.find(p => p.name === cur)) sel.value = cur;
+  const selected = profiles.find(p => p.name === sel.value) || profiles[0];
+  updateProfileEndpoint(selected);
 }
 
 // ── AUTOMATION ────────────────────────────────────────────
@@ -337,6 +372,9 @@ async function saveBuilderProfile() {
   if (r.ok) {
     addLog(`Profile "${name}" saved`, 'info');
     await loadProfiles();
+    const result = await r.json();
+    const profile = profiles.find(p => p.slug === result.slug || p.name === name);
+    if (profile) updateProfileEndpoint(profile);
   }
 }
 
@@ -351,12 +389,13 @@ async function deleteBuilderProfile() {
 }
 
 function addBuilderStep(bx, by, px, py) {
+  const action = document.getElementById('builderDefaultAction')?.value || 'click';
   const step = {
     id: Date.now(),
-    action: 'click',
+    action,
     x: bx,
     y: by,
-    label: `Click (${bx}, ${by})`
+    label: `${action === 'copy' ? 'Copy output' : action === 'goto' ? 'Goto' : 'Click'} (${bx}, ${by})`
   };
   builderSteps.push(step);
   renderStepsList();
@@ -423,7 +462,8 @@ function getStepSummary(step) {
     case 'waitSelector':
     case 'waitSelectorGone':
     case 'copy':
-    case 'read': return step.selector || '';
+    case 'read': return step.selector || step.targetSelector || '';
+    case 'goto':
     case 'navigate': return step.url || '';
     case 'evaluate': return 'JS';
     default: return '';
@@ -441,7 +481,7 @@ function renderBuilderMarkers() {
   if (!rect.width) return;
   const scaleX = rect.width / BROWSER_W;
   const scaleY = rect.height / BROWSER_H;
-  const clickSteps = builderSteps.filter(s => ['click', 'scroll', 'read'].includes(s.action) && s.x !== undefined);
+  const clickSteps = builderSteps.filter(s => ['click', 'scroll', 'read', 'copy'].includes(s.action) && s.x !== undefined);
   clickSteps.forEach((step, seq) => {
     const globalIdx = builderSteps.indexOf(step);
     const px = (rect.left - parentRect.left) + step.x * scaleX;
@@ -558,7 +598,18 @@ function renderStepEditorFields() {
       `;
       break;
     case 'copy':
-      html = `<div><label>CSS Selector</label><input id="edit-selector" type="text" value="${escAttr(step.selector || '')}" /></div>`;
+      html = `
+        <div><label>Click selector (optional)</label><input id="edit-selector" type="text" value="${escAttr(step.selector || '')}" /></div>
+        <div><label>Result selector</label><input id="edit-targetSelector" type="text" value="${escAttr(step.targetSelector || '')}" /></div>
+        <div class="edit-row">
+          <div><label>X</label><input id="edit-x" type="number" value="${step.x || 0}" /></div>
+          <div><label>Y</label><input id="edit-y" type="number" value="${step.y || 0}" /></div>
+        </div>
+        <div class="edit-row">
+          <div><label>Wait after click (ms)</label><input id="edit-waitMs" type="number" value="${step.waitMs || 600}" /></div>
+          <div><label>Polling</label><input id="edit-polling" type="checkbox" ${step.polling ? 'checked' : ''} /></div>
+        </div>
+      `;
       break;
     case 'navigate':
       html = `<div><label>URL</label><input id="edit-url" type="text" value="${escAttr(step.url || '')}" /></div>`;
@@ -596,9 +647,16 @@ function saveStepEdit() {
     case 'waitSelectorGone':
       step.selector = g('edit-selector'); step.timeout = gn('edit-timeout'); break;
     case 'copy':
+      step.selector = g('edit-selector');
+      step.targetSelector = g('edit-targetSelector');
+      step.x = gn('edit-x');
+      step.y = gn('edit-y');
+      step.waitMs = gn('edit-waitMs');
+      step.polling = gb('edit-polling');
+      break;
     case 'read':
       step.selector = g('edit-selector');
-      if (action === 'read') { step.x = gn('edit-x'); step.y = gn('edit-y'); }
+      step.x = gn('edit-x'); step.y = gn('edit-y');
       break;
     case 'navigate':
       step.url = g('edit-url'); break;
