@@ -277,9 +277,11 @@ let browser = null;
 let page = null;
 let isRunning = false;
 let shouldStop = false;
+let pingInterval = null;
 const PROFILES_FILE = path.join(__dirname, 'profiles.json');
 const VIEWPORT = { width: 1280, height: 720 };
 const logClients = new Set();
+const PING_INTERVAL = process.env.PING_INTERVAL || 5 * 60 * 1000; // 5 minutes default
 
 function broadcast(type, data) {
   const msg = `data: ${JSON.stringify({ type, ...data })}\n\n`;
@@ -291,6 +293,25 @@ function broadcast(type, data) {
 function log(message, level = 'info') {
   console.log(`[${level.toUpperCase()}] ${message}`);
   broadcast('log', { message, level, time: new Date().toISOString() });
+}
+
+function startSelfPinger() {
+  if (pingInterval) clearInterval(pingInterval);
+  pingInterval = setInterval(async () => {
+    try {
+      const http = require('http');
+      http.get(`http://localhost:${PORT}/status`, (res) => {
+        if (res.statusCode === 200) {
+          log(`🔄 Self-ping successful (${new Date().toLocaleTimeString()})`);
+        }
+      }).on('error', (err) => {
+        log(`⚠️  Self-ping failed: ${err.message}`, 'warn');
+      });
+    } catch (err) {
+      log(`Self-ping error: ${err.message}`, 'error');
+    }
+  }, PING_INTERVAL);
+  log(`✅ Self-pinger started (interval: ${PING_INTERVAL / 1000}s)`);
 }
 
 async function loadProfiles() {
@@ -914,14 +935,24 @@ app.get('/logs/stream', (req, res) => {
   req.on('close', () => logClients.delete(res));
 });
 
-// Start Server
+// Start Server - Listen FIRST, then initialize browser in background
 (async () => {
-  await initDatabase();
-  await ensureProfileStore();
-  await ensurePage();
-  log('Browser ready');
-  app.listen(PORT, '0.0.0.0', () => log(`Server running on port ${PORT}`));
-})().catch(err => {
-  log(`Fatal startup error: ${err.message}`, 'error');
-  process.exit(1);
-});
+  try {
+    await initDatabase();
+    await ensureProfileStore();
+    
+    // Start listening on port immediately (don't wait for browser)
+    app.listen(PORT, '0.0.0.0', () => log(`Server running on port ${PORT}`));
+    
+    // Start self-pinger to prevent idle timeout
+    startSelfPinger();
+    
+    // Initialize browser in background
+    ensurePage()
+      .then(() => log('Browser ready'))
+      .catch(err => log(`Browser init failed: ${err.message}`, 'error'));
+  } catch (err) {
+    log(`Fatal startup error: ${err.message}`, 'error');
+    process.exit(1);
+  }
+})();
