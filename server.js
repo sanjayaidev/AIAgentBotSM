@@ -10,6 +10,8 @@ const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL |
 const USE_POSTGRES = Boolean(DATABASE_URL);
 const API_KEY = process.env.API_KEY || process.env.BOT_API_KEY || '';
 const EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.CHROME_PATH;
+const SELF_PING_URL = process.env.SELF_PING_URL || process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${PORT}`;
+const SELF_PING_PATH = process.env.SELF_PING_PATH || '/status';
 const puppeteerExtra = require('puppeteer-extra');
 const stealth = require('puppeteer-extra-plugin-stealth');
 puppeteerExtra.use(stealth());
@@ -279,6 +281,7 @@ let isRunning = false;
 let shouldStop = false;
 let pingInterval = null;
 let lastResponse = { text: '', timestamp: null, profileName: '', prompt: '' };
+let lastCopyBotResponseEvent = null;
 const PROFILES_FILE = path.join(__dirname, 'profiles.json');
 const VIEWPORT = { width: 1280, height: 720 };
 const logClients = new Set();
@@ -298,12 +301,19 @@ function log(message, level = 'info') {
 
 function startSelfPinger() {
   if (pingInterval) clearInterval(pingInterval);
+  let baseUrl = SELF_PING_URL.replace(/\/$/, '');
+  if (!/^https?:\/\//i.test(baseUrl)) baseUrl = `https://${baseUrl}`;
+  const urlObj = new URL(baseUrl);
+  const pingUrl = urlObj.pathname === '/' ? `${baseUrl}${SELF_PING_PATH}` : baseUrl;
+  const getClient = urlObj.protocol === 'https:' ? require('https') : require('http');
+
   pingInterval = setInterval(async () => {
     try {
-      const http = require('http');
-      http.get(`http://localhost:${PORT}/status`, (res) => {
+      getClient.get(pingUrl, (res) => {
         if (res.statusCode === 200) {
           log(`🔄 Self-ping successful (${new Date().toLocaleTimeString()})`);
+        } else {
+          log(`⚠️  Self-ping returned ${res.statusCode}`, 'warn');
         }
       }).on('error', (err) => {
         log(`⚠️  Self-ping failed: ${err.message}`, 'warn');
@@ -312,7 +322,7 @@ function startSelfPinger() {
       log(`Self-ping error: ${err.message}`, 'error');
     }
   }, PING_INTERVAL);
-  log(`✅ Self-pinger started (interval: ${PING_INTERVAL / 1000}s)`);
+  log(`✅ Self-pinger started (interval: ${PING_INTERVAL / 1000}s, url: ${pingUrl})`);
 }
 
 function saveLastResponse(text, profileName, prompt) {
@@ -323,6 +333,25 @@ function saveLastResponse(text, profileName, prompt) {
     prompt
   };
   log(`💾 Response saved: ${profileName}`);
+}
+
+function normalizeExtractedText(text, context) {
+  if (!text) return '';
+  let cleaned = String(text).trim();
+  if (!context || !context.prompt) return cleaned;
+  const prompt = String(context.prompt).trim();
+  if (!prompt) return cleaned;
+
+  const promptIndex = cleaned.indexOf(prompt);
+  if (promptIndex === 0) {
+    cleaned = cleaned.slice(prompt.length).trim();
+  } else if (promptIndex > 0) {
+    const prefix = cleaned.slice(0, promptIndex).trim();
+    if (!prefix || prefix.length < 80) {
+      cleaned = cleaned.slice(promptIndex + prompt.length).trim();
+    }
+  }
+  return cleaned;
 }
 
 async function loadProfiles() {
@@ -420,7 +449,68 @@ async function ensurePage() {
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     window.chrome = { runtime: {} };
   });
+  installAnalyticsInterceptor(page);
   return page;
+}
+
+function installAnalyticsInterceptor(page) {
+  if (!page || page.__analyticsInterceptorInstalled) return;
+  page.__analyticsInterceptorInstalled = true;
+  page.on('request', async request => {
+    if (request.method() !== 'POST') return;
+    const url = request.url();
+    if (!url.includes('gator.volces.com/list')) return;
+    const postData = request.postData();
+    if (!postData) return;
+    try {
+      const payload = JSON.parse(postData);
+      const event = Array.isArray(payload) && payload[0]?.events?.[0];
+      if (event?.event === 'copyBotResponse') {
+        const outputText = await captureLastChatText(page);
+        lastCopyBotResponseEvent = {
+          event,
+          payload,
+          url,
+          outputText,
+          timestamp: new Date().toISOString()
+        };
+        if (outputText) {
+          saveLastResponse(outputText, 'AutoCopyListener', 'copyBotResponse');
+          broadcast('response', { text: outputText });
+        }
+        log('Detected copyBotResponse event');
+      }
+    } catch (err) {
+      log(`Analytics interceptor parse failed: ${err.message}`, 'warn');
+    }
+  });
+}
+
+async function captureLastChatText(page) {
+  try {
+    return await page.evaluate(() => {
+      const selectors = [
+        '[class*="bot"]',
+        '[class*="assistant"]',
+        '[class*="message"]',
+        '[class*="bubble"]',
+        '[class*="chat"]',
+        '[data-testid*="message"]',
+        '[role="log"]'
+      ];
+      const elements = selectors.flatMap(sel => Array.from(document.querySelectorAll(sel)));
+      const unique = Array.from(new Set(elements));
+      const candidates = unique
+        .map(el => ({ text: (el.innerText || el.textContent || '').trim() }))
+        .filter(item => item.text && item.text.length > 10)
+        .filter(item => !/copy|clipboard|button|click|复制/i.test(item.text));
+      if (!candidates.length) return '';
+      return candidates[candidates.length - 1].text;
+    });
+  } catch (err) {
+    log(`captureLastChatText failed: ${err.message}`, 'warn');
+    return '';
+  }
 }
 
 async function executeStep(step, context) {
@@ -541,6 +631,7 @@ async function executeStep(step, context) {
           .replace(/^(Waiting for|Generating|Typing...).*$/gm, '')
           .trim();
 
+        text = normalizeExtractedText(text, context);
         context.result = text;
         log(`✅ Copied ${text.length} chars`);
         broadcast('response', { text });
@@ -561,6 +652,7 @@ async function executeStep(step, context) {
             return el ? (el.innerText || el.textContent || '') : '';
           }, Number(step.x || 640), Number(step.y || 360));
         }
+        text = normalizeExtractedText(text, context);
         context.result = text;
         log(`Read ${text.length} chars`);
         broadcast('response', { text });
@@ -881,6 +973,19 @@ app.get('/status', (req, res) => {
 // Get Last Response
 app.get('/last-response', (req, res) => {
   res.json(lastResponse);
+});
+
+app.get('/copy-event', (req, res) => {
+  res.json({ lastCopyBotResponseEvent });
+});
+
+app.get('/copy-output', (req, res) => {
+  res.json({
+    outputText: lastCopyBotResponseEvent?.outputText || lastResponse.text || '',
+    source: lastCopyBotResponseEvent ? 'copy-event' : 'last-response',
+    event: lastCopyBotResponseEvent || null,
+    lastResponse
+  });
 });
 
 // Download Last Response as File
