@@ -1009,11 +1009,24 @@ app.post('/run', requireApiKey, async (req, res) => {
   if (isRunning) return res.status(409).json({ error: 'Already running' });
   const { profile, prompt } = req.body;
   if (!profile) return res.status(400).json({ error: 'profile required' });
-  // Don't require prompt - let backend decide based on workflow
-  runProfile(profile, prompt || '')
-    .then(result => broadcast('done', { result }))
-    .catch(e => { log(`Error: ${e.message}`, 'error'); broadcast('error', { message: e.message }); });
-  res.json({ ok: true });
+  
+  isRunning = true;
+  try {
+    // Don't require prompt - let backend decide based on workflow
+    const result = await runProfile(profile, prompt || '');
+    const profiles = await loadProfiles();
+    const profileData = profiles.find(p => p.name === profile);
+    saveLastResponse(result, profileData?.name || profile, prompt || '');
+    broadcast('done', { result });
+    res.json({ ok: true, result });
+  } catch (e) {
+    log(`Error: ${e.message}`, 'error');
+    broadcast('error', { message: e.message });
+    res.status(500).json({ error: e.message });
+  } finally {
+    isRunning = false;
+    broadcast('status', { running: false });
+  }
 });
 
 app.post('/run/:slug', requireApiKey, async (req, res) => {
