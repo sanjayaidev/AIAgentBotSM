@@ -630,6 +630,25 @@ async function navigateToProviderBaseUrl(provider) {
   }
 }
 
+async function evaluateScriptContent(scriptContent, context) {
+  const script = scriptContent.trim();
+  let wrappedScript = script;
+
+  if (/^\(?\s*(async\s+function|async\s*\(|function\s*)/.test(script)) {
+    if (script.endsWith('})();')) {
+      wrappedScript = script.replace(/\)\(\);\s*$/, '})(context);');
+    } else if (script.endsWith('}());')) {
+      wrappedScript = script.replace(/\}\(\);\s*$/, '})(context);');
+    } else {
+      wrappedScript = `return (${script})(context);`;
+    }
+  } else {
+    wrappedScript = `return (${script})(context);`;
+  }
+
+  return await page.evaluate(new Function('context', wrappedScript), context);
+}
+
 async function executeProviderScript(provider, command, context) {
   const commandPath = path.join(__dirname, 'providers', provider, `${command}.js`);
   if (!fs.existsSync(commandPath)) {
@@ -641,14 +660,14 @@ async function executeProviderScript(provider, command, context) {
   await navigateToProviderBaseUrl(provider);
 
   try {
-    return await page.evaluate(new Function('context', `return (${scriptContent})(context);`), context);
+    return await evaluateScriptContent(scriptContent, context);
   } catch (err) {
     const message = String(err.message || '').toLowerCase();
     if (message.includes('execution context was destroyed') || message.includes('cannot find context with specified id')) {
       log(`⚠️ Provider script ${provider}/${command} triggered navigation and lost execution context; retrying`);
       await ensurePage();
       await navigateToProviderBaseUrl(provider);
-      return await page.evaluate(new Function('context', `return (${scriptContent})(context);`), context);
+      return await evaluateScriptContent(scriptContent, context);
     }
     throw err;
   }
@@ -674,7 +693,7 @@ async function runJsThroughAppUI({ runMode, script, provider, command, prompt, c
 
   if (runMode === 'custom') {
     if (!script) throw new Error('No custom script provided');
-    return await page.evaluate(new Function('context', `return (${script})(context);`), context);
+    return await evaluateScriptContent(script, context);
   }
 
   if (runMode === 'provider') {
