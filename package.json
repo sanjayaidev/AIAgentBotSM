@@ -9,6 +9,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.9.5",
     "express": "^4.22.2",
     "pg": "^8.11.0",
     "puppeteer-core": "^24.43.1",

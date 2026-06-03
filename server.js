@@ -4,9 +4,11 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
+const { Pool } = require('@neondatabase/serverless');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.PG_CONNECTION_STRING;
+const USE_NEON = Boolean(DATABASE_URL && (DATABASE_URL.includes('neon.tech') || process.env.USE_NEON === 'true'));
 const USE_POSTGRES = Boolean(DATABASE_URL);
 const API_KEY = process.env.API_KEY || process.env.BOT_API_KEY || '';
 const EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.CHROME_PATH;
@@ -15,39 +17,86 @@ const SELF_PING_PATH = process.env.SELF_PING_PATH || '/status';
 const puppeteerExtra = require('puppeteer-extra');
 const stealth = require('puppeteer-extra-plugin-stealth');
 puppeteerExtra.use(stealth());
+
+// Database clients
 let dbClient = null;
+let neonPool = null;
 
 async function initDatabase() {
   if (!USE_POSTGRES) return;
-  dbClient = new Client({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
-  await dbClient.connect();
-  await dbClient.query(`
-    CREATE TABLE IF NOT EXISTS profiles (
-      slug text PRIMARY KEY,
-      name text NOT NULL,
-      url text,
-      steps jsonb NOT NULL,
-      created_at timestamptz DEFAULT now(),
-      updated_at timestamptz DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS sessions (
-      profile_name text PRIMARY KEY,
-      cookies jsonb NOT NULL,
-      storage jsonb NOT NULL,
-      updated_at timestamptz DEFAULT now()
-    );
-    CREATE TABLE IF NOT EXISTS runs (
-      id serial PRIMARY KEY,
-      profile_slug text,
-      profile_name text,
-      prompt text,
-      result text,
-      status text,
-      error text,
-      duration_ms int,
-      created_at timestamptz DEFAULT now()
-    );
-  `);
+  
+  if (USE_NEON) {
+    neonPool = new Pool({ 
+      connectionString: DATABASE_URL, 
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000
+    });
+    dbClient = neonPool;
+    
+    await neonPool.query(`
+      CREATE TABLE IF NOT EXISTS profiles (
+        slug text PRIMARY KEY,
+        name text NOT NULL,
+        url text,
+        workflow_mode text DEFAULT 'js',
+        steps jsonb NOT NULL,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        profile_name text PRIMARY KEY,
+        cookies jsonb NOT NULL,
+        storage jsonb NOT NULL,
+        updated_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS runs (
+        id serial PRIMARY KEY,
+        profile_slug text,
+        profile_name text,
+        prompt text,
+        result text,
+        status text,
+        error text,
+        duration_ms int,
+        workflow_mode text,
+        created_at timestamptz DEFAULT now()
+      );
+    `);
+    log('✅ Connected to Neon database');
+  } else {
+    dbClient = new Client({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
+    await dbClient.connect();
+    await dbClient.query(`
+      CREATE TABLE IF NOT EXISTS profiles (
+        slug text PRIMARY KEY,
+        name text NOT NULL,
+        url text,
+        steps jsonb NOT NULL,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        profile_name text PRIMARY KEY,
+        cookies jsonb NOT NULL,
+        storage jsonb NOT NULL,
+        updated_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS runs (
+        id serial PRIMARY KEY,
+        profile_slug text,
+        profile_name text,
+        prompt text,
+        result text,
+        status text,
+        error text,
+        duration_ms int,
+        created_at timestamptz DEFAULT now()
+      );
+    `);
+    log('✅ Connected to PostgreSQL database');
+  }
 }
 
 async function ensureProfileStore() {
@@ -62,26 +111,31 @@ async function ensureProfileStore() {
 }
 
 async function loadProfilesFromDb() {
-  const result = await dbClient.query('SELECT slug, name, url, steps FROM profiles ORDER BY name');
+  const result = await dbClient.query('SELECT slug, name, url, workflow_mode, steps FROM profiles ORDER BY name');
   return assignProfileSlugs(result.rows.map(row => ({
     slug: row.slug,
     name: row.name,
     url: row.url,
+    workflowMode: row.workflow_mode || 'js',
     steps: row.steps || []
   })));
 }
 
 async function saveProfilesToDb(profiles) {
-  const sanitized = profiles.map(profile => ({ ...profile, slug: slugify(profile.name) }));
+  const sanitized = profiles.map(profile => ({ 
+    ...profile, 
+    slug: slugify(profile.name),
+    workflowMode: profile.workflowMode || 'js'
+  }));
   await dbClient.query('BEGIN');
   try {
     for (const profile of sanitized) {
       await dbClient.query(
-        `INSERT INTO profiles (slug, name, url, steps, updated_at)
-         VALUES ($1, $2, $3, $4, now())
+        `INSERT INTO profiles (slug, name, url, workflow_mode, steps, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now())
          ON CONFLICT (slug) DO UPDATE
-         SET name = EXCLUDED.name, url = EXCLUDED.url, steps = EXCLUDED.steps, updated_at = now()`,
-        [profile.slug, profile.name, profile.url, profile.steps]
+         SET name = EXCLUDED.name, url = EXCLUDED.url, workflow_mode = EXCLUDED.workflow_mode, steps = EXCLUDED.steps, updated_at = now()`,
+        [profile.slug, profile.name, profile.url, profile.workflowMode, profile.steps]
       );
     }
     const slugs = sanitized.map(p => p.slug);
@@ -112,13 +166,13 @@ async function saveSessionToDb(profileName, cookies, storage) {
   );
 }
 
-async function recordRunHistory({ profileSlug, profileName, prompt, result, status, error, durationMs }) {
+async function recordRunHistory({ profileSlug, profileName, prompt, result, status, error, durationMs, workflowMode }) {
   if (!USE_POSTGRES || !dbClient) return;
   try {
     await dbClient.query(
-      `INSERT INTO runs (profile_slug, profile_name, prompt, result, status, error, duration_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [profileSlug, profileName, prompt, result, status, error, durationMs]
+      `INSERT INTO runs (profile_slug, profile_name, prompt, result, status, error, duration_ms, workflow_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [profileSlug, profileName, prompt, result, status, error, durationMs, workflowMode || 'js']
     );
   } catch (e) {
     log(`Run history save failed: ${e.message}`, 'warn');
@@ -155,25 +209,30 @@ async function getProfileBySlug(slug) {
 function getDefaultProfiles() {
   return assignProfileSlugs([
     {
-      name: 'DeepSeek Send',
-      url: 'https://chat.deepseek.com',
+      name: 'Generic JS Workflow',
+      url: '',
+      workflowMode: 'js',
       steps: [
-        { id: 1, action: 'click', x: 443, y: 558, label: 'Click textarea' },
-        { id: 2, action: 'type', text: '{{prompt}}', delay: 30, label: 'Type prompt' },
-        { id: 3, action: 'wait', ms: 1000, label: 'Wait' },
-        { id: 4, action: 'send', text: '', delay: 30, label: 'Send message (Enter)' }
+        { id: 1, action: 'navigate', url: 'https://example.com', label: 'Navigate to URL' },
+        { id: 2, action: 'waitSelector', selector: 'body', timeout: 5000, label: 'Wait for page load' },
+        { id: 3, action: 'type', selector: 'textarea, input[type="text"]', text: '{{prompt}}', delay: 30, label: 'Type prompt' },
+        { id: 4, action: 'keypress', key: 'Enter', label: 'Send message' },
+        { id: 5, action: 'wait', ms: 3000, label: 'Wait for response' },
+        { id: 6, action: 'copy', selector: '[class*="message"], [class*="response"], article', polling: true, label: 'Copy response' }
       ]
     },
     {
-      name: 'Qwen Send',
-      url: 'https://tongyi.aliyun.com/qianwen/',
+      name: 'Generic Touch Workflow',
+      url: '',
+      workflowMode: 'touch',
       steps: [
-        { id: 1, action: 'click', x: 640, y: 650, label: 'Click input' },
-        { id: 2, action: 'type', text: '{{prompt}}', delay: 30, label: 'Type prompt' },
-        { id: 3, action: 'wait', ms: 400, label: 'Pause' },
-        { id: 4, action: 'send', text: '', delay: 30, label: 'Send via Enter' },
-        { id: 5, action: 'wait', ms: 5000, label: 'Wait for response' },
-        { id: 6, action: 'copy', selector: '[class*=\"message\"]:last-child', label: 'Copy response', polling: true }
+        { id: 1, action: 'navigate', url: 'https://example.com', label: 'Navigate to URL' },
+        { id: 2, action: 'wait', ms: 2000, label: 'Wait for page load' },
+        { id: 3, action: 'click', x: 640, y: 400, label: 'Click input area' },
+        { id: 4, action: 'type', text: '{{prompt}}', delay: 30, label: 'Type prompt' },
+        { id: 5, action: 'click', x: 900, y: 650, label: 'Click send button' },
+        { id: 6, action: 'wait', ms: 3000, label: 'Wait for response' },
+        { id: 7, action: 'read', x: 640, y: 300, label: 'Read response' }
       ]
     }
   ]);
@@ -531,7 +590,11 @@ async function executeStep(step, context) {
       case 'type': {
         const text = (step.text || '').replace(/\{\{prompt\}\}/g, context.prompt || '');
         log(`Type: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"${label}`);
-        await p.keyboard.type(text, { delay: step.delay || 30 });
+        if (step.selector) {
+          await p.type(step.selector, text, { delay: step.delay || 30 });
+        } else {
+          await p.keyboard.type(text, { delay: step.delay || 30 });
+        }
         break;
       }
 
@@ -686,9 +749,9 @@ async function runProfile(profileName, prompt) {
   const runStart = Date.now();
   let runStatus = 'success';
   let runError = null;
-  const context = { prompt, result: '' };
+  const context = { prompt, result: '', workflowMode: profile.workflowMode || 'js' };
   try {
-    log(`▶ Starting: ${profileName}`);
+    log(`▶ Starting: ${profileName} [${profile.workflowMode || 'js'} mode]`);
     broadcast('status', { running: true });
     await ensurePage();
     const sessionLoaded = await loadSession(profileName);
@@ -726,7 +789,8 @@ if (profile.url) {
       result: context.result,
       status: runStatus,
       error: runError,
-      durationMs: Date.now() - runStart
+      durationMs: Date.now() - runStart,
+      workflowMode: profile.workflowMode || 'js'
     });
   }
 }
@@ -871,9 +935,15 @@ app.get('/profiles', async (req, res) => {
 app.post('/profiles', requireApiKey, async (req, res) => {
   try {
     const profiles = await loadProfiles();
-    const { name, url, steps } = req.body;
+    const { name, url, steps, workflowMode } = req.body;
     if (!name) return res.status(400).json({ error: 'Profile name is required' });
-    const sanitized = { name, url, steps, slug: slugify(name) };
+    const sanitized = { 
+      name, 
+      url, 
+      steps, 
+      slug: slugify(name),
+      workflowMode: workflowMode || 'js'
+    };
     const idx = profiles.findIndex(p => p.name === name || p.slug === sanitized.slug);
     if (idx >= 0) profiles[idx] = sanitized;
     else profiles.push(sanitized);
@@ -1036,10 +1106,105 @@ app.get('/history', requireApiKey, async (req, res) => {
   const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
   try {
     const result = await dbClient.query(
-      'SELECT id, profile_slug, profile_name, prompt, result, status, error, duration_ms, created_at FROM runs ORDER BY created_at DESC LIMIT $1',
+      'SELECT id, profile_slug, profile_name, prompt, result, status, error, duration_ms, workflow_mode, created_at FROM runs ORDER BY created_at DESC LIMIT $1',
       [limit]
     );
     res.json({ history: result.rows });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Data API - Send and receive data from external tools/devices
+app.post('/data/send', requireApiKey, async (req, res) => {
+  try {
+    const { key, value, metadata } = req.body;
+    if (!key) return res.status(400).json({ error: 'Key is required' });
+    
+    if (USE_POSTGRES && dbClient) {
+      await dbClient.query(
+        `INSERT INTO data_store (key, value, metadata, created_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, metadata = EXCLUDED.metadata, updated_at = now()`,
+        [key, JSON.stringify(value), JSON.stringify(metadata || {})]
+      );
+      log(`Data stored: ${key}`);
+    } else {
+      const dataFile = path.join(__dirname, 'data_store.json');
+      let data = {};
+      if (fs.existsSync(dataFile)) {
+        data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+      }
+      data[key] = { value, metadata, updatedAt: new Date().toISOString() };
+      fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
+      log(`Data stored (file): ${key}`);
+    }
+    
+    res.json({ ok: true, key });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/data/receive', requireApiKey, async (req, res) => {
+  try {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ error: 'Key query parameter is required' });
+    
+    let result = null;
+    if (USE_POSTGRES && dbClient) {
+      const queryResult = await dbClient.query(
+        'SELECT value, metadata, created_at, updated_at FROM data_store WHERE key = $1',
+        [key]
+      );
+      if (queryResult.rows[0]) {
+        result = {
+          key,
+          value: JSON.parse(queryResult.rows[0].value),
+          metadata: JSON.parse(queryResult.rows[0].metadata || '{}'),
+          createdAt: queryResult.rows[0].created_at,
+          updatedAt: queryResult.rows[0].updated_at
+        };
+      }
+    } else {
+      const dataFile = path.join(__dirname, 'data_store.json');
+      if (fs.existsSync(dataFile)) {
+        const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+        if (data[key]) {
+          result = { key, ...data[key] };
+        }
+      }
+    }
+    
+    if (result) {
+      res.json(result);
+    } else {
+      res.status(404).json({ error: 'Key not found' });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/data/list', requireApiKey, async (req, res) => {
+  try {
+    let keys = [];
+    if (USE_POSTGRES && dbClient) {
+      const result = await dbClient.query(
+        'SELECT key, created_at, updated_at FROM data_store ORDER BY updated_at DESC'
+      );
+      keys = result.rows;
+    } else {
+      const dataFile = path.join(__dirname, 'data_store.json');
+      if (fs.existsSync(dataFile)) {
+        const data = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+        keys = Object.keys(data).map(key => ({
+          key,
+          updatedAt: data[key].updatedAt
+        }));
+      }
+    }
+    res.json({ keys });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
