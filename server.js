@@ -3,13 +3,10 @@ const express = require('express');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { Client } = require('pg');
-const neon = require('@neondatabase/serverless');
-const { Pool } = neon;
+const { Client, Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.PG_CONNECTION_STRING;
-const USE_NEON = Boolean(DATABASE_URL && (DATABASE_URL.includes('neon.tech') || process.env.USE_NEON === 'true'));
 const USE_POSTGRES = Boolean(DATABASE_URL);
 const API_KEY = process.env.API_KEY || process.env.BOT_API_KEY || '';
 const EXECUTABLE_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || process.env.CHROME_PATH;
@@ -19,128 +16,64 @@ const puppeteerExtra = require('puppeteer-extra');
 const stealth = require('puppeteer-extra-plugin-stealth');
 puppeteerExtra.use(stealth());
 
-// Configure Neon for serverless environments
-if (typeof neon.neonConfig !== 'undefined') {
-  neon.neonConfig.wsProxy = (host) => `wss://${host}:5432/v1`;
-  neon.neonConfig.useSecureWebSocket = true;
-  neon.neonConfig.pipelineConnect = false;
-}
-
 // Database clients
 let dbClient = null;
-let neonPool = null;
 
 async function initDatabase() {
   if (!USE_POSTGRES) return;
   
-  if (USE_NEON) {
-    try {
-      neonPool = new Pool({ 
-        connectionString: DATABASE_URL, 
-        ssl: { rejectUnauthorized: false },
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000
-      });
-      dbClient = neonPool;
-      
-      // Test connection first
-      await neonPool.query('SELECT 1');
-      
-      await neonPool.query(`
-        CREATE TABLE IF NOT EXISTS profiles (
-          slug text PRIMARY KEY,
-          name text NOT NULL,
-          url text,
-          workflow_mode text DEFAULT 'js',
-          steps jsonb NOT NULL,
-          created_at timestamptz DEFAULT now(),
-          updated_at timestamptz DEFAULT now()
-        );
-        CREATE TABLE IF NOT EXISTS sessions (
-          profile_name text PRIMARY KEY,
-          cookies jsonb NOT NULL,
-          storage jsonb NOT NULL,
-          updated_at timestamptz DEFAULT now()
-        );
-        CREATE TABLE IF NOT EXISTS runs (
-          id serial PRIMARY KEY,
-          profile_slug text,
-          profile_name text,
-          prompt text,
-          result text,
-          status text,
-          error text,
-          duration_ms int,
-          workflow_mode text,
-          created_at timestamptz DEFAULT now()
-        );
-        CREATE TABLE IF NOT EXISTS data_store (
-          key text PRIMARY KEY,
-          value jsonb NOT NULL,
-          metadata jsonb DEFAULT '{}',
-          created_at timestamptz DEFAULT now(),
-          updated_at timestamptz DEFAULT now()
-        );
-      `);
-      log('✅ Connected to Neon database');
-    } catch (error) {
-      log('❌ Neon database connection failed:', error.message);
-      log('Falling back to standard PostgreSQL client...');
-      USE_NEON = false;
-      if (neonPool) {
-        await neonPool.end().catch(() => {});
-        neonPool = null;
-      }
-      // Fall through to standard client
-    }
-  }
-  
-  if (!dbClient && DATABASE_URL) {
-    dbClient = new Client({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
-    await dbClient.connect();
-    try {
-      await dbClient.query(`
-        CREATE TABLE IF NOT EXISTS profiles (
-          slug text PRIMARY KEY,
-          name text NOT NULL,
-          url text,
-          workflow_mode text DEFAULT 'js',
-          steps jsonb NOT NULL,
-          created_at timestamptz DEFAULT now(),
-          updated_at timestamptz DEFAULT now()
-        );
-        CREATE TABLE IF NOT EXISTS sessions (
-          profile_name text PRIMARY KEY,
-          cookies jsonb NOT NULL,
-          storage jsonb NOT NULL,
-          updated_at timestamptz DEFAULT now()
-        );
-        CREATE TABLE IF NOT EXISTS runs (
-          id serial PRIMARY KEY,
-          profile_slug text,
-          profile_name text,
-          prompt text,
-          result text,
-          status text,
-          error text,
-          duration_ms int,
-          workflow_mode text,
-          created_at timestamptz DEFAULT now()
-        );
-        CREATE TABLE IF NOT EXISTS data_store (
-          key text PRIMARY KEY,
-          value jsonb NOT NULL,
-          metadata jsonb DEFAULT '{}',
-          created_at timestamptz DEFAULT now(),
-          updated_at timestamptz DEFAULT now()
-        );
-      `);
-      log('✅ Connected to PostgreSQL database');
-    } catch (error) {
-      log('❌ PostgreSQL table creation failed:', error.message);
-      throw error;
-    }
+  try {
+    dbClient = new Pool({ 
+      connectionString: DATABASE_URL, 
+      ssl: { rejectUnauthorized: false },
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000
+    });
+    
+    // Test connection first
+    await dbClient.query('SELECT 1');
+    
+    await dbClient.query(`
+      CREATE TABLE IF NOT EXISTS profiles (
+        slug text PRIMARY KEY,
+        name text NOT NULL,
+        url text,
+        workflow_mode text DEFAULT 'js',
+        steps jsonb NOT NULL,
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+        profile_name text PRIMARY KEY,
+        cookies jsonb NOT NULL,
+        storage jsonb NOT NULL,
+        updated_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS runs (
+        id serial PRIMARY KEY,
+        profile_slug text,
+        profile_name text,
+        prompt text,
+        result text,
+        status text,
+        error text,
+        duration_ms int,
+        workflow_mode text,
+        created_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS data_store (
+        key text PRIMARY KEY,
+        value jsonb NOT NULL,
+        metadata jsonb DEFAULT '{}',
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
+    `);
+    log('✅ Connected to PostgreSQL database');
+  } catch (error) {
+    log('❌ Database connection failed:', error.message);
+    throw error;
   }
 }
 
