@@ -63,6 +63,13 @@ async function initDatabase() {
         workflow_mode text,
         created_at timestamptz DEFAULT now()
       );
+      CREATE TABLE IF NOT EXISTS data_store (
+        key text PRIMARY KEY,
+        value jsonb NOT NULL,
+        metadata jsonb DEFAULT '{}',
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
+      );
     `);
     log('✅ Connected to Neon database');
   } else {
@@ -73,6 +80,7 @@ async function initDatabase() {
         slug text PRIMARY KEY,
         name text NOT NULL,
         url text,
+        workflow_mode text DEFAULT 'js',
         steps jsonb NOT NULL,
         created_at timestamptz DEFAULT now(),
         updated_at timestamptz DEFAULT now()
@@ -92,7 +100,15 @@ async function initDatabase() {
         status text,
         error text,
         duration_ms int,
+        workflow_mode text,
         created_at timestamptz DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS data_store (
+        key text PRIMARY KEY,
+        value jsonb NOT NULL,
+        metadata jsonb DEFAULT '{}',
+        created_at timestamptz DEFAULT now(),
+        updated_at timestamptz DEFAULT now()
       );
     `);
     log('✅ Connected to PostgreSQL database');
@@ -724,9 +740,31 @@ async function executeStep(step, context) {
 
       case 'evaluate': {
         log(`Evaluate${label}`);
-        const result = await p.evaluate(new Function(`return (${step.script})()`));
+        const result = await p.evaluate(new Function('context', `return (${step.script})(context);`), context);
         if (result !== undefined) {
-          context.result = String(result);
+          if (typeof result === 'object' && result !== null) {
+            if (result.result !== undefined) context.result = String(result.result);
+            Object.assign(context, result);
+          } else {
+            context.result = String(result);
+          }
+          broadcast('response', { text: context.result });
+        }
+        break;
+      }
+
+      case 'js': {
+        log(`Execute JS${label}`);
+        const script = step.code || step.script || '';
+        if (!script) throw new Error('No JavaScript code provided');
+        const result = await p.evaluate(new Function('context', `return (${script})(context);`), context);
+        if (result !== undefined) {
+          if (typeof result === 'object' && result !== null) {
+            if (result.result !== undefined) context.result = String(result.result);
+            Object.assign(context, result);
+          } else {
+            context.result = String(result);
+          }
           broadcast('response', { text: context.result });
         }
         break;
