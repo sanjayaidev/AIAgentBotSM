@@ -238,6 +238,15 @@
             </select>
           </label>
         </div>
+        <div class="field-row" id="scriptSourceRow" style="display:none;">
+          <label style="flex:1; font-size:12px; color:#aaa;">
+            Execution Source
+            <select id="builderScriptSource" style="width:100%; margin-top:4px;">
+              <option value="provider">Use existing provider script</option>
+              <option value="custom">Type custom JS code</option>
+            </select>
+          </label>
+        </div>
         <div class="field-row" id="scriptRow" style="display:none;">
           <label style="flex:1; font-size:12px; color:#aaa;">
             JavaScript Code
@@ -266,7 +275,7 @@
           <button id="builderExecuteJsBtn" class="btn-primary" onclick="executeJSScriptFromBuilder()" style="display:none;">⚡ Execute JS</button>
         </div>
         <div class="builder-hint">
-          👆 Touch Mode: Click on the live browser view (left) to add steps. 💻 JS Mode: Write custom automation scripts.
+          👆 Touch Mode: Click on the live browser view (left) to add steps. 💻 JS Mode: choose between provider command scripts or custom JS, then execute with the Builder button.
         </div>
       </div>
 

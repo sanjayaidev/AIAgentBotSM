@@ -7,6 +7,7 @@ let isRunning = false;
 let liveInterval = null;
 let builderMode = false;
 let builderWorkflowMode = 'touch'; // 'touch' or 'js'
+let builderScriptSource = 'provider'; // 'provider' or 'custom'
 let builderDefaultAction = 'click';
 let sse = null;
 let sortable = null;
@@ -444,6 +445,7 @@ async function executeJSScriptFromBuilder() {
   const script = document.getElementById('builderScript').value.trim();
   const provider = document.getElementById('builderProvider').value;
   const command = document.getElementById('builderCommand').value;
+  const scriptSource = document.getElementById('builderScriptSource')?.value || builderScriptSource;
   const email = document.getElementById('providerEmail').value.trim();
   const password = document.getElementById('providerPassword').value.trim();
   const apiKey = document.getElementById('providerApiKey').value.trim();
@@ -454,8 +456,12 @@ async function executeJSScriptFromBuilder() {
     return;
   }
   
-  if (!script) {
+  if (scriptSource === 'custom' && !script) {
     addLog('Please enter JavaScript code first', 'error');
+    return;
+  }
+  if (scriptSource === 'provider' && (!provider || !command)) {
+    addLog('Please select a provider and command to use existing script', 'error');
     return;
   }
   
@@ -476,7 +482,11 @@ async function executeJSScriptFromBuilder() {
     const r = await fetch('/execute-js-direct', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ script, context })
+      body: JSON.stringify({
+        runMode: scriptSource,
+        script: scriptSource === 'custom' ? script : '',
+        context: { provider, command, prompt: '', credentials: { email, password, apiKey } }
+      })
     });
     
     const data = await r.json();
@@ -586,9 +596,16 @@ function loadBuilderFromProfile(profile) {
   builderWorkflowMode = workflowMode;
   
   if (workflowMode === 'js') {
-    // JS mode: load provider, command, script
+    // JS mode: load provider, command, script source and code
     if (profile.provider) document.getElementById('builderProvider').value = profile.provider;
     if (profile.command) document.getElementById('builderCommand').value = profile.command;
+    if (profile.scriptSource) {
+      builderScriptSource = profile.scriptSource;
+      document.getElementById('builderScriptSource').value = profile.scriptSource;
+    } else {
+      builderScriptSource = profile.script ? 'custom' : 'provider';
+      document.getElementById('builderScriptSource').value = builderScriptSource;
+    }
     if (profile.script) document.getElementById('builderScript').value = profile.script;
     updateCommandOptions(profile.provider);
     updateWorkflowModeUI();
@@ -645,7 +662,8 @@ async function saveBuilderProfile() {
   if (workflowMode === 'js') {
     payload.provider = document.getElementById('builderProvider').value;
     payload.command = document.getElementById('builderCommand').value;
-    payload.script = document.getElementById('builderScript').value;
+    payload.scriptSource = document.getElementById('builderScriptSource')?.value || 'provider';
+    payload.script = payload.scriptSource === 'custom' ? document.getElementById('builderScript').value : '';
     payload.steps = []; // No steps in JS mode
   }
   
@@ -1012,11 +1030,36 @@ function setupWorkflowModeSwitch() {
       updateCommandOptions(providerSelect.value);
     });
   }
+
+  const scriptSourceSelect = document.getElementById('builderScriptSource');
+  if (scriptSourceSelect) {
+    scriptSourceSelect.addEventListener('change', () => {
+      builderScriptSource = scriptSourceSelect.value;
+      updateScriptSourceUI();
+    });
+  }
+}
+
+function updateScriptSourceUI() {
+  const source = document.getElementById('builderScriptSource')?.value || builderScriptSource;
+  builderScriptSource = source;
+
+  const commandRow = document.getElementById('commandRow');
+  const scriptRow = document.getElementById('scriptRow');
+
+  if (source === 'provider') {
+    if (commandRow) commandRow.style.display = 'flex';
+    if (scriptRow) scriptRow.style.display = 'none';
+  } else {
+    if (commandRow) commandRow.style.display = 'none';
+    if (scriptRow) scriptRow.style.display = 'flex';
+  }
 }
 
 function updateWorkflowModeUI() {
   const providerRow = document.getElementById('providerRow');
   const commandRow = document.getElementById('commandRow');
+  const scriptSourceRow = document.getElementById('scriptSourceRow');
   const scriptRow = document.getElementById('scriptRow');
   const credentialsRow = document.getElementById('credentialsRow');
   const stepsHeader = document.getElementById('stepsHeader');
@@ -1026,23 +1069,23 @@ function updateWorkflowModeUI() {
   const builderExecuteJsBtn = document.getElementById('builderExecuteJsBtn');
   
   if (builderWorkflowMode === 'js') {
-    // JS Mode: show script editor, hide steps
+    // JS Mode: show provider + source selector, hide steps
     if (providerRow) providerRow.style.display = 'flex';
-    if (commandRow) commandRow.style.display = 'flex';
-    if (scriptRow) scriptRow.style.display = 'flex';
-    // Show credentials row when a provider is selected
-    const selectedProvider = document.getElementById('builderProvider')?.value;
-    if (credentialsRow) credentialsRow.style.display = selectedProvider ? 'flex' : 'none';
+    if (scriptSourceRow) scriptSourceRow.style.display = 'flex';
     if (stepsHeader) stepsHeader.style.display = 'none';
     if (stepsList) stepsList.style.display = 'none';
-    // Show JS button, hide Touch buttons
     if (touchModeBtns) touchModeBtns.style.display = 'none';
     if (jsModeBtns) jsModeBtns.style.display = 'flex';
     if (builderExecuteJsBtn) builderExecuteJsBtn.style.display = 'inline-block';
+
+    updateScriptSourceUI();
+    const selectedProvider = document.getElementById('builderProvider')?.value;
+    if (credentialsRow) credentialsRow.style.display = selectedProvider ? 'flex' : 'none';
   } else {
     // Touch Mode: show steps, hide script/provider
     if (providerRow) providerRow.style.display = 'none';
     if (commandRow) commandRow.style.display = 'none';
+    if (scriptSourceRow) scriptSourceRow.style.display = 'none';
     if (scriptRow) scriptRow.style.display = 'none';
     if (credentialsRow) credentialsRow.style.display = 'none';
     if (stepsHeader) stepsHeader.style.display = 'flex';

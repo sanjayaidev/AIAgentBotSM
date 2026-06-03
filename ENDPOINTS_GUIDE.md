@@ -343,21 +343,22 @@ POST /profiles
   "name": "My Bot Profile",
   "url": "https://example.com",
   "label": "My Custom Bot",
-  "steps": [
-    {
-      "action": "navigate",
-      "url": "https://example.com"
-    },
-    {
-      "action": "click",
-      "selector": "button.submit"
-    },
-    {
-      "action": "type",
-      "selector": "input[type=text]",
-      "text": "{{prompt}}"
-    }
-  ]
+  "workflowMode": "js",
+  "scriptSource": "provider",
+  "provider": "deepseek",
+  "command": "prompt",
+  "steps": []
+}
+```
+
+**Custom JS Example**:
+```json
+{
+  "name": "My JS Profile",
+  "url": "https://chat.deepseek.com",
+  "workflowMode": "js",
+  "scriptSource": "custom",
+  "script": "async function run(context) { const { page, message } = context; return { success: true, result: message }; }"
 }
 ```
 
@@ -371,6 +372,13 @@ POST /profiles
 - `read`: Read text from element
 - `wait`: Wait for element or time
 - `evaluate`: Run JavaScript
+
+**JS Mode Profile Properties**:
+- `workflowMode`: `touch` or `js`
+- `scriptSource`: `provider` or `custom`
+- `provider`: Provider key for built-in scripts (e.g. `deepseek`)
+- `command`: Provider command name (e.g. `prompt`, `login`)
+- `script`: Custom JS code when `scriptSource` is `custom`
 
 ---
 
@@ -416,6 +424,8 @@ POST /run
 ```
 
 **Note**: Use `/logs/stream` SSE endpoint to get real-time updates
+
+> Profiles saved with `workflowMode: "js"` and `scriptSource: "provider"` will execute a provider command script. Profiles saved with `scriptSource: "custom"` will execute the custom JS code stored in `script`.
 
 ---
 

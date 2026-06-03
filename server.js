@@ -45,7 +45,7 @@ async function initDatabase() {
         name text NOT NULL,
         url text,
         workflow_mode text DEFAULT 'touch',
-        steps jsonb DEFAULT '[]'::jsonb, provider text, command text, script text,
+        steps jsonb DEFAULT '[]'::jsonb, provider text, command text, script text, script_source text, script_source text,
         created_at timestamptz DEFAULT now(),
         updated_at timestamptz DEFAULT now()
       );
@@ -85,6 +85,7 @@ async function initDatabase() {
         updated_at timestamptz DEFAULT now()
       );
     `);
+    await dbClient.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS script_source text;`);
     log('✅ Connected to PostgreSQL database');
   } catch (error) {
     log('❌ Database connection failed:', error.message);
@@ -104,12 +105,13 @@ async function ensureProfileStore() {
 }
 
 async function loadProfilesFromDb() {
-  const result = await dbClient.query('SELECT slug, name, url, workflow_mode, steps, provider, command, script FROM profiles ORDER BY name');
+  const result = await dbClient.query('SELECT slug, name, url, workflow_mode, steps, provider, command, script, script_source FROM profiles ORDER BY name');
   return assignProfileSlugs(result.rows.map(row => ({
     slug: row.slug,
     name: row.name,
     url: row.url,
-    workflowMode: row.workflow_mode || 'touch', provider: row.provider || null, command: row.command || null, script: row.script || null,
+    workflowMode: row.workflow_mode || 'touch', provider: row.provider || null, command: row.command || null,
+    script: row.script || null, scriptSource: row.script_source || 'provider',
     steps: row.steps || []
   })));
 }
@@ -118,19 +120,19 @@ async function saveProfilesToDb(profiles) {
   const sanitized = profiles.map(profile => ({ 
     ...profile, 
     slug: slugify(profile.name),
-    workflowMode: profile.workflowMode || 'js'
+    workflowMode: profile.workflowMode || 'touch'
   }));
   await dbClient.query('BEGIN');
   try {
     for (const profile of sanitized) {
       await dbClient.query(
-        `INSERT INTO profiles (slug, name, url, workflow_mode, steps, provider, command, script, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+        `INSERT INTO profiles (slug, name, url, workflow_mode, steps, provider, command, script, script_source, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
          ON CONFLICT (slug) DO UPDATE
          SET name = EXCLUDED.name, url = EXCLUDED.url, workflow_mode = EXCLUDED.workflow_mode, 
              steps = EXCLUDED.steps, provider = EXCLUDED.provider, command = EXCLUDED.command, 
-             script = EXCLUDED.script, updated_at = now()`,
-        [profile.slug, profile.name, profile.url, profile.workflowMode, profile.steps, profile.provider, profile.command, profile.script]
+             script = EXCLUDED.script, script_source = EXCLUDED.script_source, updated_at = now()`,
+        [profile.slug, profile.name, profile.url, profile.workflowMode, profile.steps, profile.provider, profile.command, profile.script, profile.scriptSource || 'provider']
       );
     }
     const slugs = sanitized.map(p => p.slug);
@@ -971,14 +973,15 @@ app.get('/profiles', async (req, res) => {
 app.post('/profiles', requireApiKey, async (req, res) => {
   try {
     const profiles = await loadProfiles();
-    const { name, url, steps, workflowMode, provider, command, script } = req.body;
+    const { name, url, steps, workflowMode, provider, command, script, scriptSource } = req.body;
     if (!name) return res.status(400).json({ error: 'Profile name is required' });
     const sanitized = { 
       name, 
       url, 
       steps, 
       slug: slugify(name),
-      workflowMode: workflowMode || 'touch', provider: provider || null, command: command || null, script: script || null
+      workflowMode: workflowMode || 'touch', provider: provider || null, command: command || null,
+      script: script || null, scriptSource: scriptSource || 'provider'
     };
     const idx = profiles.findIndex(p => p.name === name || p.slug === sanitized.slug);
     if (idx >= 0) profiles[idx] = sanitized;
@@ -1359,8 +1362,8 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
       return res.status(400).json({ error: 'Profile is not in JS mode' });
     }
     
-    if (!profileData.script) {
-      return res.status(400).json({ error: 'No script defined for this profile' });
+    if (!profileData.script && !(profileData.provider && profileData.command)) {
+      return res.status(400).json({ error: 'No script or provider command defined for this profile' });
     }
     
     // Load credentials if provider is set
@@ -1401,30 +1404,32 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
     
     log(`▶ Executing JS script for profile: ${profile}`);
     
-    // Execute the script with better error handling and support for IIFE or function definitions
-    const scriptResult = await page.evaluate(async (scriptCode, ctx) => {
-      try {
-        const result = eval(scriptCode);
-        
-        // If result is a promise, await it
-        if (result && typeof result.then === 'function') {
-          return await result;
-        }
-        
-        // If result is a function, call it with context
-        if (typeof result === 'function') {
-          const fnResult = result(ctx);
-          if (fnResult && typeof fnResult.then === 'function') {
-            return await fnResult;
+    let scriptResult;
+    if (profileData.script) {
+      // Execute custom saved JS script
+      scriptResult = await page.evaluate(async (scriptCode, ctx) => {
+        try {
+          const result = eval(scriptCode);
+          if (result && typeof result.then === 'function') {
+            return await result;
           }
-          return fnResult;
+          if (typeof result === 'function') {
+            const fnResult = result(ctx);
+            if (fnResult && typeof fnResult.then === 'function') {
+              return await fnResult;
+            }
+            return fnResult;
+          }
+          return result;
+        } catch (evalErr) {
+          throw new Error(`Script execution error: ${evalErr.message}`);
         }
-        
-        return result;
-      } catch (evalErr) {
-        throw new Error(`Script execution error: ${evalErr.message}`);
-      }
-    }, profileData.script, context);
+      }, profileData.script, context);
+    } else {
+      // Execute provider command script from file
+      log(`▶ Executing provider command script: ${profileData.provider}/${profileData.command}`);
+      scriptResult = await executeProviderCommand(profileData.provider, profileData.command, context);
+    }
     
     log(`✅ JS script executed successfully`);
     res.json({ ok: true, result: scriptResult });
@@ -1441,8 +1446,8 @@ app.post('/execute-js-direct', requireApiKey, async (req, res) => {
   try {
     const { script, context: reqContext } = req.body;
     
-    if (!script) {
-      return res.status(400).json({ error: 'Script is required' });
+    if (!script && !(reqContext?.provider && reqContext?.command)) {
+      return res.status(400).json({ error: 'Script or provider command is required' });
     }
     
     // Load credentials if provider is set
@@ -1482,30 +1487,30 @@ app.post('/execute-js-direct', requireApiKey, async (req, res) => {
     
     log(`▶ Executing JS script directly from Builder`);
     
-    // Execute the script with better error handling and support for IIFE or function definitions
-    const scriptResult = await page.evaluate(async (scriptCode, ctx) => {
-      try {
-        const result = eval(scriptCode);
-        
-        // If result is a promise, await it
-        if (result && typeof result.then === 'function') {
-          return await result;
-        }
-        
-        // If result is a function, call it with context
-        if (typeof result === 'function') {
-          const fnResult = result(ctx);
-          if (fnResult && typeof fnResult.then === 'function') {
-            return await fnResult;
+    let scriptResult;
+    if (script) {
+      scriptResult = await page.evaluate(async (scriptCode, ctx) => {
+        try {
+          const result = eval(scriptCode);
+          if (result && typeof result.then === 'function') {
+            return await result;
           }
-          return fnResult;
+          if (typeof result === 'function') {
+            const fnResult = result(ctx);
+            if (fnResult && typeof fnResult.then === 'function') {
+              return await fnResult;
+            }
+            return fnResult;
+          }
+          return result;
+        } catch (evalErr) {
+          throw new Error(`Script execution error: ${evalErr.message}`);
         }
-        
-        return result;
-      } catch (evalErr) {
-        throw new Error(`Script execution error: ${evalErr.message}`);
-      }
-    }, script, context);
+      }, script, context);
+    } else {
+      log(`▶ Executing provider command script: ${reqContext.provider}/${reqContext.command}`);
+      scriptResult = await executeProviderCommand(reqContext.provider, reqContext.command, context);
+    }
     
     log(`✅ JS script executed successfully`);
     res.json({ ok: true, result: scriptResult });
