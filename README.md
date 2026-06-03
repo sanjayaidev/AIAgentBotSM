@@ -52,7 +52,7 @@ curl "http://localhost:3000/run/my-touch-profile?prompt=Hello" \
 
 ## JS mode execution
 
-JS mode can execute either a saved provider script or custom JavaScript.
+JS mode can execute either a saved provider script, custom JavaScript, or a UI-driven builder workflow.
 
 ### Provider script execution
 
@@ -96,11 +96,52 @@ curl -X POST "http://localhost:3000/execute-js-direct" \
   }'
 ```
 
+### UI-driven JS execution (remote control of the app builder)
+
+Use `POST /execute-js-ui` to have the server open the local app UI, select the provider and action dropdowns, click the execute button, and return the builder output.
+
+```bash
+curl -X POST "http://localhost:3000/execute-js-ui" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "runMode": "provider",
+    "context": {
+      "provider": "deepseek",
+      "command": "prompt",
+      "prompt": "Hello from remote UI",
+      "credentials": {
+        "email": "user@example.com",
+        "password": "secret",
+        "apiKey": ""
+      }
+    }
+  }'
+```
+
+You can also force UI-driven execution via `POST /execute-js-direct` or `POST /execute-js` by including `"useUi": true` in the request body.
+
+```bash
+curl -X POST "http://localhost:3000/execute-js-direct" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "runMode": "custom",
+    "useUi": true,
+    "script": "async function run(context) { return { result: context.prompt }; }",
+    "context": {
+      "prompt": "Hello via UI",
+      "credentials": {"email":"","password":"","apiKey":""}
+    }
+  }'
+```
+
 ### Notes
 
 - `runMode` must be `provider` or `custom`
 - `provider` and `command` are required when `runMode` is `provider`
-- `prompt` is optional for execution and is passed into the script context as `context.prompt`
+- `prompt` is optional and is available in `context.prompt`
+- UI-driven execution will capture the app builder output box and return that response
 
 ## Google provider support
 

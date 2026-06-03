@@ -576,6 +576,92 @@ function installAnalyticsInterceptor(page) {
   });
 }
 
+async function openAppUiPage() {
+  await ensurePage();
+  const uiUrl = `http://127.0.0.1:${PORT}/`;
+  log(`▶ Opening UI page at ${uiUrl}`);
+  await page.goto(uiUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+  await page.waitForSelector('.tab[data-tab="builder"]', { timeout: 10000 });
+  await page.click('.tab[data-tab="builder"]');
+  await page.waitForSelector('#builderWorkflowMode', { visible: true, timeout: 10000 });
+  return page;
+}
+
+async function setAppUiElement(page, selector, value, isSelect = false) {
+  if (!selector) return;
+  if (isSelect) {
+    await page.evaluate((sel, val) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      el.value = val;
+      const event = new Event('change', { bubbles: true });
+      el.dispatchEvent(event);
+    }, selector, value);
+  } else {
+    await page.evaluate((sel, val) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      el.value = val;
+      ['input', 'change'].forEach(evt => el.dispatchEvent(new Event(evt, { bubbles: true })));
+    }, selector, value);
+  }
+  await page.waitForTimeout(100);
+}
+
+async function runJsThroughAppUI({ runMode, script, provider, command, prompt, credentials = {}, chatIndex, imageSize, videoSize, code }) {
+  await openAppUiPage();
+  await setAppUiElement(page, '#builderWorkflowMode', 'js', true);
+  await page.waitForTimeout(200);
+  const sourceMode = runMode === 'custom' ? 'custom' : 'provider';
+  await setAppUiElement(page, '#builderScriptSource', sourceMode, true);
+  await page.waitForTimeout(200);
+
+  if (sourceMode === 'custom') {
+    await setAppUiElement(page, '#builderScript', script || '');
+  }
+
+  if (provider) {
+    await setAppUiElement(page, '#builderProvider', provider, true);
+    await page.waitForTimeout(200);
+  }
+
+  if (command) {
+    await setAppUiElement(page, '#builderCommand', command, true);
+    await page.waitForTimeout(200);
+  }
+
+  if (prompt !== undefined) {
+    await setAppUiElement(page, '#builderPromptInput', prompt || '');
+  }
+
+  if (credentials.email) await setAppUiElement(page, '#providerEmail', credentials.email);
+  if (credentials.password) await setAppUiElement(page, '#providerPassword', credentials.password);
+  if (credentials.apiKey) await setAppUiElement(page, '#providerApiKey', credentials.apiKey);
+  if (chatIndex !== undefined) await setAppUiElement(page, '#builderChatIndex', String(chatIndex));
+  if (imageSize) await setAppUiElement(page, '#builderMediaSize', imageSize, true);
+  if (videoSize) await setAppUiElement(page, '#builderMediaSize', videoSize, true);
+  if (code) await setAppUiElement(page, '#builderGoogle2FACode', code);
+
+  await page.waitForSelector('#builderExecuteJsBtn', { visible: true, timeout: 10000 });
+  await page.click('#builderExecuteJsBtn');
+  log('▶ Clicked builder UI execute button');
+
+  await page.waitForFunction(() => {
+    const box = document.getElementById('builderResponseBox');
+    if (!box) return false;
+    const text = box.innerText.trim();
+    return text && !text.includes('Builder output will appear here');
+  }, { timeout: 60000 });
+
+  const uiOutput = await page.evaluate(() => {
+    const box = document.getElementById('builderResponseBox');
+    return box ? box.innerText.trim() : '';
+  });
+
+  log(`✅ Builder UI output captured (${uiOutput ? uiOutput.length : 0} chars)`);
+  return uiOutput;
+}
+
 async function captureLastChatText(page) {
   try {
     return await page.evaluate(() => {
@@ -1404,7 +1490,8 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
   if (isRunning) return res.status(409).json({ error: 'Already running' });
   
   try {
-    const { profile, prompt } = req.body;
+    const { profile, prompt, useUi, ui } = req.body;
+    const useUiControl = Boolean(useUi || ui);
     
     if (!profile) {
       return res.status(400).json({ error: 'Profile name is required' });
@@ -1422,6 +1509,24 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
     
     if (!profileData.script && !(profileData.provider && profileData.command)) {
       return res.status(400).json({ error: 'No script or provider command defined for this profile' });
+    }
+    
+    if (useUiControl) {
+      const scriptSource = profileData.scriptSource === 'custom' ? 'custom' : 'provider';
+      const credentials = profileData.provider ? await getProviderCredentials(profileData.provider) : {};
+      const uiResult = await runJsThroughAppUI({
+        runMode: scriptSource,
+        script: profileData.script || '',
+        provider: profileData.provider || '',
+        command: profileData.command || '',
+        prompt: prompt || '',
+        credentials: { email: credentials?.email || '', password: credentials?.password || '', apiKey: credentials?.api_key || '' },
+        chatIndex: profileData.chatIndex,
+        imageSize: profileData.imageSize,
+        videoSize: profileData.videoSize,
+        code: profileData.code
+      });
+      return res.json({ ok: true, result: uiResult });
     }
     
     // Load credentials if provider is set
@@ -1503,10 +1608,27 @@ app.post('/execute-js-direct', requireApiKey, async (req, res) => {
   if (isRunning) return res.status(409).json({ error: 'Already running' });
   
   try {
-    const { script, context: reqContext } = req.body;
+    const { script, context: reqContext, useUi, ui } = req.body;
+    const useUiControl = Boolean(useUi || ui);
     
     if (!script && !(reqContext?.provider && reqContext?.command)) {
       return res.status(400).json({ error: 'Script or provider command is required' });
+    }
+
+    if (useUiControl) {
+      const uiResult = await runJsThroughAppUI({
+        runMode: script ? 'custom' : 'provider',
+        script: script || '',
+        provider: reqContext?.provider || '',
+        command: reqContext?.command || '',
+        prompt: reqContext?.prompt || '',
+        credentials: reqContext?.credentials || {},
+        chatIndex: reqContext?.chatIndex,
+        imageSize: reqContext?.imageSize,
+        videoSize: reqContext?.videoSize,
+        code: reqContext?.code
+      });
+      return res.json({ ok: true, result: uiResult });
     }
     
     // Load credentials if provider is set
@@ -1583,6 +1705,41 @@ app.post('/execute-js-direct', requireApiKey, async (req, res) => {
     res.json({ ok: true, result: scriptResult });
   } catch (e) {
     log(`❌ JS execution failed: ${e.message}`, 'error');
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/execute-js-ui', requireApiKey, async (req, res) => {
+  if (isRunning) return res.status(409).json({ error: 'Already running' });
+  
+  try {
+    const { runMode, script, context: reqContext } = req.body;
+    if (!runMode || !['provider', 'custom'].includes(runMode)) {
+      return res.status(400).json({ error: 'runMode must be either "provider" or "custom"' });
+    }
+    if (runMode === 'custom' && !script) {
+      return res.status(400).json({ error: 'Custom script is required for custom runMode' });
+    }
+    if (runMode === 'provider' && !(reqContext?.provider && reqContext?.command)) {
+      return res.status(400).json({ error: 'provider and command are required for provider runMode' });
+    }
+
+    const uiResult = await runJsThroughAppUI({
+      runMode,
+      script: script || '',
+      provider: reqContext?.provider || '',
+      command: reqContext?.command || '',
+      prompt: reqContext?.prompt || '',
+      credentials: reqContext?.credentials || {},
+      chatIndex: reqContext?.chatIndex,
+      imageSize: reqContext?.imageSize,
+      videoSize: reqContext?.videoSize,
+      code: reqContext?.code
+    });
+
+    res.json({ ok: true, result: uiResult });
+  } catch (e) {
+    log(`❌ JS UI execution failed: ${e.message}`, 'error');
     res.status(500).json({ error: e.message });
   }
 });

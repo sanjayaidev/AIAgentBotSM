@@ -535,6 +535,58 @@ POST /execute-js-direct
 - `runMode` must be `provider` or `custom`
 - `prompt` is available in `context.prompt`
 - `provider` and `command` are required for provider-based execution
+- Add `"useUi": true` to execute through the local builder UI instead of running directly on the provider page
+
+---
+
+### 20. Execute JS through App UI
+```
+POST /execute-js-ui
+```
+**Authentication**: ✅ Required
+
+**Body** (provider mode):
+```json
+{
+  "runMode": "provider",
+  "context": {
+    "provider": "deepseek",
+    "command": "prompt",
+    "prompt": "Hello from remote UI",
+    "credentials": {
+      "email": "user@example.com",
+      "password": "secret",
+      "apiKey": ""
+    }
+  }
+}
+```
+
+**Body** (custom JS mode):
+```json
+{
+  "runMode": "custom",
+  "script": "async function run(context) { return { success: true, prompt: context.prompt }; }",
+  "context": {
+    "prompt": "Hello from remote UI",
+    "credentials": {
+      "email": "",
+      "password": "",
+      "apiKey": ""
+    }
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "ok": true,
+  "result": "...captured UI builder output..."
+}
+```
+
+**Use case**: remote UI control that selects provider and command dropdowns in the app, clicks the execute button, and returns the output from the builder response box.
 
 ---
 
