@@ -2,8 +2,11 @@
   const email = context.email || '';
   const password = context.password || '';
   
-  // Ensure we are on the correct URL
-  if (!window.location.href.includes('chat.qwen.ai')) {
+  // Ensure we are on a recognized Qwen URL
+  const allowedQwenHosts = ['chat.qwen.ai', 'qwen.ai', 'tongyi.aliyun.com', 'qianwen.aliyun.com'];
+  const currentHref = window.location.href || '';
+  const isQwenHost = allowedQwenHosts.some(host => currentHref.includes(host));
+  if (!isQwenHost) {
     window.location.href = 'https://chat.qwen.ai';
     await new Promise(r => setTimeout(r, 3000));
   }

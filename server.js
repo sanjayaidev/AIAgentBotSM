@@ -617,13 +617,25 @@ const PROVIDER_BASE_URLS = {
   google: 'https://accounts.google.com'
 };
 
+const PROVIDER_VALID_HOSTNAMES = {
+  deepseek: ['chat.deepseek.com'],
+  qwen: ['chat.qwen.ai', 'qwen.ai', 'tongyi.aliyun.com', 'qianwen.aliyun.com'],
+  chatgpt: ['chatgpt.com'],
+  claude: ['claude.ai'],
+  gemini: ['gemini.google.com'],
+  google: ['accounts.google.com']
+};
+
 async function navigateToProviderBaseUrl(provider) {
   const baseUrl = PROVIDER_BASE_URLS[provider];
   if (!baseUrl) return;
-  const targetHost = new URL(baseUrl).hostname;
+
+  const validHosts = PROVIDER_VALID_HOSTNAMES[provider] || [new URL(baseUrl).hostname];
   let currentUrl = '';
   try { currentUrl = await page.url(); } catch (_) {}
-  if (!currentUrl.includes(targetHost)) {
+
+  const isValidUrl = validHosts.some(host => currentUrl.includes(host));
+  if (!isValidUrl) {
     log(`Navigating to provider base URL for ${provider}: ${baseUrl}`);
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000);
@@ -673,6 +685,20 @@ async function executeProviderScript(provider, command, context) {
 
 async function runJsThroughAppUI({ runMode, script, provider, command, prompt, credentials = {}, chatIndex, imageSize, videoSize, code }) {
   await ensurePage();
+
+  // Auto-load saved provider credentials when invoked via API without explicit credentials
+  if (provider && !credentials.email && !credentials.password && !credentials.apiKey) {
+    const saved = await getProviderCredentials(provider);
+    if (saved) {
+      credentials = {
+        ...credentials,
+        email: credentials.email || saved.email || '',
+        password: credentials.password || saved.password || '',
+        apiKey: credentials.apiKey || saved.api_key || saved.apiKey || ''
+      };
+      log(`🔑 Loaded saved credentials for provider ${provider}`);
+    }
+  }
 
   const context = {
     prompt,

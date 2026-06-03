@@ -21,7 +21,7 @@
     const candidates = [...document.querySelectorAll('.qwen-markdown, .response-message-content')].reverse();
     for (const el of candidates) {
       const text = (el.innerText || el.textContent || '').trim();
-      if (text && text.length >= 50) return text;
+      if (text && text.length >= 5) return text;
     }
     return '';
   };
