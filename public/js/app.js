@@ -25,10 +25,7 @@ window.addEventListener('DOMContentLoaded', () => {
   setupFloatingLogs();
   setupWorkflowModeSwitch();
   updateUrl();
-  document.getElementById('profileSelect').addEventListener('change', () => {
-    const profile = profiles.find(p => p.name === document.getElementById('profileSelect').value);
-    if (profile) updateProfileEndpoint(profile);
-  });
+  // Profile select change handler is now in renderProfileSelect()
 });
 
 // ── TABS ──────────────────────────────────────────────────
@@ -276,7 +273,17 @@ async function loadProfiles() {
     const r = await fetch('/profiles');
     profiles = await r.json();
     renderProfileSelect();
-    if (profiles.length) {
+    // Don't auto-load first profile - wait for user selection or keep current
+    const sel = document.getElementById('profileSelect');
+    const selectedName = sel.value;
+    if (selectedName) {
+      const profile = profiles.find(p => p.name === selectedName);
+      if (profile) {
+        loadBuilderFromProfile(profile);
+        updateProfileEndpoint(profile);
+      }
+    } else if (profiles.length) {
+      // Only load first if nothing selected yet
       loadBuilderFromProfile(profiles[0]);
       updateProfileEndpoint(profiles[0]);
     }
@@ -319,20 +326,40 @@ function renderProfileSelect() {
   if (cur && profiles.find(p => p.name === cur)) sel.value = cur;
   const selected = profiles.find(p => p.name === sel.value) || profiles[0];
   updateProfileEndpoint(selected);
+  
+  // Auto-load workflow when profile selection changes in Automation tab
+  sel.addEventListener('change', () => {
+    const profile = profiles.find(p => p.name === sel.value);
+    if (profile) {
+      loadBuilderFromProfile(profile);
+      updateProfileEndpoint(profile);
+    }
+  });
 }
 
 // ── AUTOMATION ────────────────────────────────────────────
 async function runAutomation() {
-  const profile = document.getElementById('profileSelect').value;
+  const profileName = document.getElementById('profileSelect').value;
   const prompt = document.getElementById('promptInput').value.trim();
-  if (!prompt) { addLog('Enter a prompt first', 'warn'); return; }
-  addLog(`▶ Run "${profile}" — "${prompt.substring(0, 40)}..."`, 'info');
+  
+  // Get the selected profile to check its workflow mode
+  const profile = profiles.find(p => p.name === profileName);
+  if (!profile) { addLog('Profile not found', 'error'); return; }
+  
+  // Only require prompt if there's a text input element or prompt placeholder in the workflow
+  const needsPrompt = shouldRequirePrompt(profile);
+  if (needsPrompt && !prompt) { 
+    addLog('Enter a prompt first', 'warn'); 
+    return; 
+  }
+  
+  addLog(`▶ Run "${profileName}"`, 'info');
   setRunning(true);
   try {
     const r = await fetch('/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ profile, prompt })
+      body: JSON.stringify({ profile: profileName, prompt: prompt || '' })
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Failed');
@@ -340,6 +367,27 @@ async function runAutomation() {
     addLog('Error: ' + e.message, 'error');
     setRunning(false);
   }
+}
+
+// Check if the workflow requires a prompt based on mode and steps
+function shouldRequirePrompt(profile) {
+  if (!profile) return true;
+  
+  // JS mode with script - check if script uses context.message
+  if (profile.workflowMode === 'js' && profile.script) {
+    return profile.script.includes('context.message') || profile.script.includes('message');
+  }
+  
+  // Touch mode - check if any step has text input
+  if (profile.steps && Array.isArray(profile.steps)) {
+    return profile.steps.some(step => 
+      step.action === 'type' || step.action === 'send' || 
+      (step.label && step.label.toLowerCase().includes('prompt'))
+    );
+  }
+  
+  // Default: don't require prompt if no text elements found
+  return false;
 }
 
 async function stopAutomation() {
@@ -467,6 +515,11 @@ async function saveBuilderProfile() {
     const result = await r.json();
     const profile = profiles.find(p => p.slug === result.slug || p.name === name);
     if (profile) updateProfileEndpoint(profile);
+    // Keep current workflow visible - don't reset
+    document.getElementById('builderName').value = name;
+  } else {
+    const err = await r.json().catch(() => ({ error: 'Save failed' }));
+    addLog(`Save failed: ${err.error}`, 'error');
   }
 }
 
@@ -476,8 +529,12 @@ async function deleteBuilderProfile() {
   await fetch('/profiles/' + encodeURIComponent(name), { method: 'DELETE' });
   addLog(`Profile "${name}" deleted`, 'warn');
   await loadProfiles();
+  // Clear current workflow after delete
   builderSteps = [];
   renderStepsList();
+  document.getElementById('builderName').value = '';
+  document.getElementById('builderUrl').value = '';
+  document.getElementById('builderScript').value = '';
 }
 
 function addBuilderStep(bx, by, px, py) {

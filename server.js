@@ -976,8 +976,8 @@ app.post('/run', requireApiKey, async (req, res) => {
   if (isRunning) return res.status(409).json({ error: 'Already running' });
   const { profile, prompt } = req.body;
   if (!profile) return res.status(400).json({ error: 'profile required' });
-  if (!prompt) return res.status(400).json({ error: 'prompt required' });
-  runProfile(profile, prompt)
+  // Don't require prompt - let backend decide based on workflow
+  runProfile(profile, prompt || '')
     .then(result => broadcast('done', { result }))
     .catch(e => { log(`Error: ${e.message}`, 'error'); broadcast('error', { message: e.message }); });
   res.json({ ok: true });
@@ -987,12 +987,12 @@ app.post('/run/:slug', requireApiKey, async (req, res) => {
   if (isRunning) return res.status(409).json({ error: 'Already running' });
   const slug = decodeURIComponent(req.params.slug);
   const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'prompt required' });
+  // Don't require prompt - let backend decide based on workflow
   try {
-    const reply = await runProfileBySlug(slug, prompt);
+    const reply = await runProfileBySlug(slug, prompt || '');
     const profiles = await loadProfiles();
     const profile = profiles.find(p => p.slug === slug);
-    saveLastResponse(reply, profile?.name || slug, prompt);
+    saveLastResponse(reply, profile?.name || slug, prompt || '');
     res.json({ ok: true, reply });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1003,7 +1003,7 @@ app.get('/run/:slug', requireApiKey, async (req, res) => {
   if (isRunning) return res.status(409).json({ error: 'Already running' });
   const slug = decodeURIComponent(req.params.slug);
   const prompt = req.query.prompt || '';
-  if (!prompt) return res.status(400).json({ error: 'prompt query required' });
+  // Don't require prompt query - allow empty for workflows without text input
   try {
     const reply = await runProfileBySlug(slug, prompt);
     const profiles = await loadProfiles();
