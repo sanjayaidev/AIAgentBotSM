@@ -12,8 +12,30 @@
   if (!email) throw new Error('No email provided');
   if (!password) throw new Error('No password provided');
   
+  const waitForElement = async (selectors, timeoutMs = 15000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (el) return el;
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return null;
+  };
+
+  const findInput = selectors => selectors
+    .map(selector => document.querySelector(selector))
+    .find(Boolean) || null;
+
   // Step 1: Email
-  const emailInput = document.querySelector('input[type="email"]');
+  const emailInput = await waitForElement([
+    'input[type="email"]',
+    'input[name="identifier"]',
+    'input#identifierId',
+    'input[name="Email"]',
+    'input[autocomplete="email"]'
+  ]);
   if (!emailInput) throw new Error('Email input not found');
   
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -26,18 +48,13 @@
   
   console.log('✅ Email entered');
   
-  // Wait for password page
-  await new Promise(r => setTimeout(r, 2000));
-  
-  let attempts = 0;
-  let passwordInput = null;
-  
-  while (attempts < 30 && !passwordInput) {
-    await new Promise(r => setTimeout(r, 500));
-    passwordInput = document.querySelector('input[type="password"]');
-    attempts++;
-  }
-  
+  // Step 2: Password
+  const passwordInput = await waitForElement([
+    'input[type="password"]',
+    'input[name="password"]',
+    'input[name="Passwd"]',
+    'input[autocomplete="current-password"]'
+  ], 20000);
   if (!passwordInput) throw new Error('Password input not found');
   
   setter.call(passwordInput, password);

@@ -483,6 +483,7 @@ async function executeJSScriptFromBuilder() {
           chatIndex: document.getElementById('builderChatIndex')?.value || '0',
           imageSize: document.getElementById('builderMediaSize')?.value || '',
           videoSize: document.getElementById('builderMediaSize')?.value || '',
+          code: document.getElementById('builderGoogle2FACode')?.value || '',
           credentials: { email, password, apiKey }
         }
       })
@@ -1125,12 +1126,16 @@ function updateCommandExtraFields() {
   const command = document.getElementById('builderCommand')?.value;
   const chatIndexRow = document.getElementById('chatIndexRow');
   const qwenMediaSizeRow = document.getElementById('qwenMediaSizeRow');
+  const google2faRow = document.getElementById('google2faRow');
 
   if (chatIndexRow) {
     chatIndexRow.style.display = command === 'gotochat' ? 'flex' : 'none';
   }
   if (qwenMediaSizeRow) {
     qwenMediaSizeRow.style.display = ['qwenimage', 'qwenvideo'].includes(command) ? 'flex' : 'none';
+  }
+  if (google2faRow) {
+    google2faRow.style.display = command === '2fa' ? 'flex' : 'none';
   }
 }
 

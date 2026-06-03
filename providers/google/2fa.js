@@ -10,16 +10,26 @@
   if (!code) throw new Error('No verification code provided');
   if (code.length !== 6) throw new Error('Code must be 6 digits');
   
-  // Wait for code input to appear
-  let attempts = 0;
-  let codeInput = null;
-  
-  while (attempts < 30 && !codeInput) {
-    await new Promise(r => setTimeout(r, 500));
-    codeInput = document.querySelector('input[type="tel"], input[name="totpPin"]');
-    attempts++;
-  }
-  
+  const waitForElement = async (selectors, timeoutMs = 15000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (el) return el;
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+    return null;
+  };
+
+  const codeInput = await waitForElement([
+    'input[type="tel"]',
+    'input[name="totpPin"]',
+    'input[name="code"]',
+    'input[name="smsUserPin"]',
+    'input[autocomplete="one-time-code"]',
+    'input[type="text"]'
+  ], 20000);
   if (!codeInput) throw new Error('Code input not found');
   
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
