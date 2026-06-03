@@ -537,6 +537,8 @@ async function ensurePage() {
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     window.chrome = { runtime: {} };
   });
+  // Ensure the page is focused so input events from Puppeteer are delivered
+  try { await page.bringToFront(); } catch (e) { /* noop */ }
   installAnalyticsInterceptor(page);
   return page;
 }
@@ -607,23 +609,29 @@ async function executeStep(step, context) {
   try {
     switch (step.action) {
       case 'click':
-        if (step.selector) {
-          await p.click(step.selector);
-          log(`Click selector: ${step.selector}${label}`);
-        } else {
-          await p.mouse.click(Number(step.x), Number(step.y));
-          log(`Click at (${step.x}, ${step.y})${label}`);
-        }
+          try { await p.bringToFront(); } catch (_) {}
+          if (step.selector) {
+            try { await p.waitForSelector(step.selector, { visible: true, timeout: 5000 }); } catch (_) {}
+            await p.click(step.selector, { delay: 50 });
+            log(`Click selector: ${step.selector}${label}`);
+          } else {
+            await p.mouse.move(Number(step.x || 0), Number(step.y || 0));
+            await p.mouse.click(Number(step.x || 0), Number(step.y || 0));
+            log(`Click at (${step.x}, ${step.y})${label}`);
+          }
         break;
 
       case 'type': {
         const text = (step.text || '').replace(/\{\{prompt\}\}/g, context.prompt || '');
         log(`Type: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"${label}`);
-        if (step.selector) {
-          await p.type(step.selector, text, { delay: step.delay || 30 });
-        } else {
-          await p.keyboard.type(text, { delay: step.delay || 30 });
-        }
+          try { await p.bringToFront(); } catch (_) {}
+          if (step.selector) {
+            try { await p.waitForSelector(step.selector, { visible: true, timeout: 5000 }); } catch (_) {}
+            await p.click(step.selector, { delay: 50 });
+            await p.keyboard.type(text, { delay: step.delay || 30 });
+          } else {
+            await p.keyboard.type(text, { delay: step.delay || 30 });
+          }
         break;
       }
 
@@ -636,12 +644,19 @@ async function executeStep(step, context) {
         const text = (step.text || '').replace(/\{\{prompt\}\}/g, context.prompt || '');
         const delay = step.delay || 30;
         if (text) {
-          log(`Send: typing "${text.substring(0, 40)}${text.length > 40 ? '...' : ''}"${label}`);
-          await p.keyboard.type(text, { delay });
+            log(`Send: typing "${text.substring(0, 40)}${text.length > 40 ? '...' : ''}"${label}`);
+            try { await p.bringToFront(); } catch (_) {}
+            if (step.selector) {
+              try { await p.waitForSelector(step.selector, { visible: true, timeout: 5000 }); } catch (_) {}
+              await p.click(step.selector, { delay: 50 });
+              await p.keyboard.type(text, { delay });
+            } else {
+              await p.keyboard.type(text, { delay });
+            }
         } else {
           log(`Send: pressing Enter only${label}`);
         }
-        await p.keyboard.press('Enter');
+          await p.keyboard.press('Enter');
         log(`Send complete${label}`);
         break;
       }
