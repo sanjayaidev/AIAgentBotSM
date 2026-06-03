@@ -45,7 +45,11 @@ async function initDatabase() {
         name text NOT NULL,
         url text,
         workflow_mode text DEFAULT 'touch',
-        steps jsonb DEFAULT '[]'::jsonb, provider text, command text, script text, script_source text, script_source text,
+        steps jsonb DEFAULT '[]'::jsonb,
+        provider text,
+        command text,
+        script text,
+        script_source text,
         created_at timestamptz DEFAULT now(),
         updated_at timestamptz DEFAULT now()
       );
@@ -86,6 +90,7 @@ async function initDatabase() {
       );
     `);
     await dbClient.query(`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS script_source text;`);
+    await dbClient.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS workflow_mode text;`);
     log('✅ Connected to PostgreSQL database');
   } catch (error) {
     log('❌ Database connection failed:', error.message);
@@ -1338,7 +1343,8 @@ app.post('/providers/:provider/login', requireApiKey, async (req, res) => {
       qwen: 'https://chat.qwen.ai',
       chatgpt: 'https://chat.openai.com',
       claude: 'https://claude.ai',
-      gemini: 'https://gemini.google.com'
+      gemini: 'https://gemini.google.com',
+      google: 'https://accounts.google.com/signin/v2/identifier'
     };
     
     const targetUrl = providerUrls[provider];

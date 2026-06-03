@@ -388,12 +388,6 @@ async function runAutomation() {
   if (!profile) { addLog('Profile not found', 'error'); return; }
   
   // Only require prompt if there's a text input element or prompt placeholder in the workflow
-  const needsPrompt = shouldRequirePrompt(profile);
-  if (needsPrompt && !prompt) { 
-    addLog('Enter a prompt first', 'warn'); 
-    return; 
-  }
-  
   addLog(`▶ Run "${profileName}"`, 'info');
   setRunning(true);
   try {
@@ -1206,7 +1200,8 @@ function updateCommandOptions(provider) {
     qwen: ['newchat', 'gotochat', 'getchats', 'prompt', 'qwenimage', 'qwenvideo'],
     chatgpt: ['newchat', 'gotochat', 'getchats', 'prompt'],
     claude: ['newchat', 'gotochat', 'getchats', 'promptui'],
-    gemini: ['newchat', 'gotochat', 'getchats']
+    gemini: ['newchat', 'gotochat', 'getchats'],
+    google: ['login', '2fa']
   };
   
   const cmds = commands[provider] || [];
@@ -1214,7 +1209,7 @@ function updateCommandOptions(provider) {
     cmds.map(c => `<option value="${c}">${c}</option>`).join('');
   
   // Show credentials row for providers that support login
-  const providersWithLogin = ['deepseek'];
+  const providersWithLogin = ['deepseek', 'google'];
   if (credentialsRow) {
     credentialsRow.style.display = providersWithLogin.includes(provider) ? 'flex' : 'none';
   }

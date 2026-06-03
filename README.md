@@ -16,77 +16,141 @@ See `ENDPOINTS_GUIDE.md` for full API documentation, including:
 - automation execution (`/run`, `/browser/*`, `/execute-js`)
 - JS mode profiles and provider script execution
 
-## JS mode notes
+## Touch mode execution
 
-Profiles saved with:
+Touch mode workflows execute saved click/type/send/navigate steps in the browser.
 
-- `workflowMode: "js"`
-- `scriptSource: "provider"`
+### Run profile
 
-will execute a provider command script (for example, `deepseek` + `prompt`).
+`POST /run/{slug}`
 
-Profiles saved with:
-
-- `workflowMode: "js"`
-- `scriptSource: "custom"`
-
-will execute the custom JavaScript stored in `script`.
-
-## Direct JS API usage
-
-The app also supports direct JS execution without saving a profile using `/execute-js-direct`.
-
-### Endpoint
-
-`POST /execute-js-direct`
-
-### Required headers
-
-- `Content-Type: application/json`
-- `x-api-key: your_api_key_here`
-
-### Example body (provider script)
+Request body:
 
 ```json
 {
-  "runMode": "provider",
-  "script": "",
-  "context": {
-    "provider": "deepseek",
-    "command": "prompt",
-    "prompt": "Hello from direct JS mode",
-    "credentials": {
-      "email": "user@example.com",
-      "password": "secret",
-      "apiKey": ""
-    }
-  }
+  "prompt": "optional prompt text"
 }
 ```
 
-### Example body (custom JS)
+`prompt` is optional for touch mode; the workflow will still execute even when it is empty.
 
-```json
-{
-  "runMode": "custom",
-  "script": "async function run(context) { return { success: true, prompt: context.prompt }; }",
-  "context": {
-    "prompt": "Hello from custom JS mode",
-    "credentials": {
-      "email": "",
-      "password": "",
-      "apiKey": ""
+### Example
+
+```bash
+curl -X POST "http://localhost:3000/run/my-touch-profile" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{"prompt":"Hello"}'
+```
+
+You can also call:
+
+```bash
+curl "http://localhost:3000/run/my-touch-profile?prompt=Hello" \
+  -H "x-api-key: $API_KEY"
+```
+
+## JS mode execution
+
+JS mode can execute either a saved provider script or custom JavaScript.
+
+### Provider script execution
+
+Use `POST /execute-js-direct` with `runMode: "provider"`.
+
+```bash
+curl -X POST "http://localhost:3000/execute-js-direct" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "runMode": "provider",
+    "script": "",
+    "context": {
+      "provider": "deepseek",
+      "command": "prompt",
+      "prompt": "Hello from JS mode",
+      "credentials": {
+        "email": "user@example.com",
+        "password": "secret",
+        "apiKey": ""
+      }
     }
-  }
-}
+  }'
+```
+
+### Custom JS execution
+
+Use `POST /execute-js-direct` with `runMode: "custom"`.
+
+```bash
+curl -X POST "http://localhost:3000/execute-js-direct" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "runMode": "custom",
+    "script": "async function run(context) { return { success: true, prompt: context.prompt }; }",
+    "context": {
+      "prompt": "Hello from custom JS mode",
+      "credentials": {"email":"","password":"","apiKey":""}
+    }
+  }'
 ```
 
 ### Notes
 
 - `runMode` must be `provider` or `custom`
-- `provider` and `command` are required for provider-based execution
-- `prompt` is passed into the script context as `context.prompt`
-- The response will contain the result from the executed script
+- `provider` and `command` are required when `runMode` is `provider`
+- `prompt` is optional for execution and is passed into the script context as `context.prompt`
+
+## Google provider support
+
+This app now supports a `google` provider with the following commands:
+
+- `login` — enter Google email and password on the sign-in page
+- `2fa` — submit a 6-digit verification code when prompted
+
+### Example direct provider login
+
+```bash
+curl -X POST "http://localhost:3000/execute-js-direct" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "runMode": "provider",
+    "script": "",
+    "context": {
+      "provider": "google",
+      "command": "login",
+      "email": "your-email@gmail.com",
+      "password": "your-password"
+    }
+  }'
+```
+
+### Google 2FA example
+
+```bash
+curl -X POST "http://localhost:3000/execute-js-direct" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "runMode": "provider",
+    "script": "",
+    "context": {
+      "provider": "google",
+      "command": "2fa",
+      "code": "123456"
+    }
+  }'
+```
+
+## Postgres schema fix
+
+If your database is already initialized and the `runs` table is missing the `workflow_mode` column, run this SQL:
+
+```sql
+ALTER TABLE runs ADD COLUMN IF NOT EXISTS workflow_mode text;
+```
 
 ## Browser usage
 
