@@ -12,7 +12,25 @@
   const ratio = context.videoSize || '16:9';
 
   // Step 1 — open a new chat
-  const newChat = document.querySelector('.sidebar-entry-fixed-list-content');
+  const selectors = [
+    '.sidebar-entry-fixed-list-content',
+    'button[title*="New chat"]',
+    'button[aria-label*="New chat"]',
+    'button[data-testid*="new-chat"]',
+    'button[data-test-id*="new-chat"]',
+    '.chat-sidebar-new-chat',
+    '.new-chat-button'
+  ];
+  let newChat = null;
+  for (const selector of selectors) {
+    newChat = document.querySelector(selector);
+    if (newChat) break;
+  }
+  if (!newChat) {
+    newChat = [...document.querySelectorAll('button,div,a,span')].find(el =>
+      el.textContent && /new\s*chat/i.test(el.textContent.trim())
+    );
+  }
   if (!newChat) throw new Error('New Chat button not found');
   newChat.click();
   await new Promise(r => setTimeout(r, 800));
