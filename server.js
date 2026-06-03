@@ -496,7 +496,11 @@ async function ensureBrowser() {
       '--disable-background-timer-throttling',
       '--disable-renderer-backgrounding',
       '--disable-features=site-per-process,TranslateUI',
-      '--disable-software-rasterizer'
+      '--disable-software-rasterizer',
+      '--disable-extensions-except=chrome-extension://mmeijimgabbpbgpdklnllpncmdofmgpo',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-web-resources',
+      '--disable-client-side-phishing-detection'
     ],
     defaultViewport: VIEWPORT,
     ignoreDefaultArgs: ['--enable-automation', '--disable-extensions'],
@@ -515,10 +519,31 @@ async function ensurePage() {
   await page.setUserAgent(UA);
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });\n    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    Object.defineProperty(navigator, 'permissions', { value: { query: () => Promise.resolve({ state: 1 }) } });
+    Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.' });
+    Object.defineProperty(navigator, 'connection', { get: () => ({ downlink: 10, effectiveType: '4g', rtt: 50 }) });
     window.chrome = { runtime: {} };
+    window.navigator.vendor = 'Google Inc.';
+    delete window.__HEADLESS__;
+    delete window.__puppet__;
   });
+  
+  // Add realistic request headers
+  await page.setExtraHTTPHeaders({
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Linux"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1'
+  });
+  
   installAnalyticsInterceptor(page);
   return page;
 }
@@ -1344,7 +1369,7 @@ app.post('/providers/:provider/login', requireApiKey, async (req, res) => {
       chatgpt: 'https://chat.openai.com',
       claude: 'https://claude.ai',
       gemini: 'https://gemini.google.com',
-      google: 'https://accounts.google.com/signin/v2/identifier'
+      google: 'https://accounts.google.com/v3/signin/identifier'
     };
     
     const targetUrl = providerUrls[provider];
@@ -1419,7 +1444,8 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
         qwen: 'https://chat.qwen.ai',
         chatgpt: 'https://chat.openai.com',
         claude: 'https://claude.ai',
-        gemini: 'https://gemini.google.com'
+        gemini: 'https://gemini.google.com',
+        google: 'https://accounts.google.com/v3/signin/identifier'
       };
       const targetUrl = providerUrls[profileData.provider];
       if (targetUrl) {
@@ -1505,7 +1531,8 @@ app.post('/execute-js-direct', requireApiKey, async (req, res) => {
         qwen: 'https://chat.qwen.ai',
         chatgpt: 'https://chat.openai.com',
         claude: 'https://claude.ai',
-        gemini: 'https://gemini.google.com'
+        gemini: 'https://gemini.google.com',
+        google: 'https://accounts.google.com/v3/signin/identifier'
       };
       const targetUrl = providerUrls[context.provider];
       if (targetUrl) {
