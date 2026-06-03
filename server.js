@@ -1370,7 +1370,7 @@ app.post('/providers/:provider/login', requireApiKey, async (req, res) => {
       chatgpt: 'https://chat.openai.com',
       claude: 'https://claude.ai',
       gemini: 'https://gemini.google.com',
-      google: 'https://accounts.google.com/v3/signin/identifier'
+      google: 'https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fwww.google.com%2Fsearch%3Fq%3Dgoogle%2Bsignin%26rlz%3D1C1CHBD_enIN1105IN1106%26oq%3Dgoogl%26gs_lcrp%3DEgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgYIARBFGDkyBggCEEUYPDIGCAMQRRg8MgYIBBBFGDwyBggFEEUYPDIGCAYQRRg8MgYIBxBFGDzSAQgxMTc3ajBqN6gCALACAA%26sourceid%3Dchrome%26ie%3DUTF-8%26sei%3DHikgaqHTG6S94-EP7t3k6Ag&dsh=S-1506942775%3A1780492576621609&ec=futura_srp_og_si_72236_p&hl=en&passive=true&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AWa2PaumkpzrE4lE8NAuXE8BS-8DhiLdWPV0I1u6VfS3x1cpUMBMPjE3nO5HS3Gm4UtXYe3AcKg2dQ'
     };
     
     const targetUrl = providerUrls[provider];
@@ -1446,7 +1446,7 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
         chatgpt: 'https://chat.openai.com',
         claude: 'https://claude.ai',
         gemini: 'https://gemini.google.com',
-        google: 'https://accounts.google.com/v3/signin/identifier'
+        google: 'https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fwww.google.com%2Fsearch%3Fq%3Dgoogle%2Bsignin%26rlz%3D1C1CHBD_enIN1105IN1106%26oq%3Dgoogl%26gs_lcrp%3DEgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgYIARBFGDkyBggCEEUYPDIGCAMQRRg8MgYIBBBFGDwyBggFEEUYPDIGCAYQRRg8MgYIBxBFGDzSAQgxMTc3ajBqN6gCALACAA%26sourceid%3Dchrome%26ie%3DUTF-8%26sei%3DHikgaqHTG6S94-EP7t3k6Ag&dsh=S-1506942775%3A1780492576621609&ec=futura_srp_og_si_72236_p&hl=en&passive=true&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AWa2PaumkpzrE4lE8NAuXE8BS-8DhiLdWPV0I1u6VfS3x1cpUMBMPjE3nO5HS3Gm4UtXYe3AcKg2dQ'
       };
       const targetUrl = providerUrls[profileData.provider];
       if (targetUrl) {
@@ -1533,7 +1533,7 @@ app.post('/execute-js-direct', requireApiKey, async (req, res) => {
         chatgpt: 'https://chat.openai.com',
         claude: 'https://claude.ai',
         gemini: 'https://gemini.google.com',
-        google: 'https://accounts.google.com/v3/signin/identifier'
+        google: 'https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fwww.google.com%2Fsearch%3Fq%3Dgoogle%2Bsignin%26rlz%3D1C1CHBD_enIN1105IN1106%26oq%3Dgoogl%26gs_lcrp%3DEgZjaHJvbWUqBggAEEUYOzIGCAAQRRg7MgYIARBFGDkyBggCEEUYPDIGCAMQRRg8MgYIBBBFGDwyBggFEEUYPDIGCAYQRRg8MgYIBxBFGDzSAQgxMTc3ajBqN6gCALACAA%26sourceid%3Dchrome%26ie%3DUTF-8%26sei%3DHikgaqHTG6S94-EP7t3k6Ag&dsh=S-1506942775%3A1780492576621609&ec=futura_srp_og_si_72236_p&hl=en&passive=true&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AWa2PaumkpzrE4lE8NAuXE8BS-8DhiLdWPV0I1u6VfS3x1cpUMBMPjE3nO5HS3Gm4UtXYe3AcKg2dQ'
       };
       const targetUrl = providerUrls[context.provider];
       if (targetUrl) {

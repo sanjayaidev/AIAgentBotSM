@@ -308,11 +308,13 @@
           <button class="btn-primary" onclick="saveBuilderProfile()">💾 Save Profile</button>
           <button class="btn-sm" onclick="loadBuilderProfile()">📂 Load</button>
           <button class="btn-danger btn-sm" onclick="deleteBuilderProfile()">🗑 Delete</button>
+          <!-- Touch Mode Run Button (only visible in touch mode) -->
+          <button id="builderRunTouchBtn" class="btn-primary" onclick="runBuilderTouchWorkflow()">▶ Run Touch</button>
           <!-- JS Mode Execute Button (only visible in JS mode) -->
           <button id="builderExecuteJsBtn" class="btn-primary" onclick="executeJSScriptFromBuilder()" style="display:none;">⚡ Execute JS</button>
         </div>
         <div class="builder-hint">
-          👆 Touch Mode: Click on the live browser view (left) to add steps. 💻 JS Mode: choose between provider command scripts or custom JS, then execute with the Builder button.
+          👆 Touch Mode: Click on the live browser view (left) to add steps, then click "Run Touch" to execute immediately. 💻 JS Mode: choose between provider command scripts or custom JS, then execute with the "Execute JS" button.
         </div>
       </div>
 

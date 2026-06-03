@@ -523,6 +523,121 @@ function shouldRequirePrompt(profile) {
   return false;
 }
 
+// Run touch workflow directly from Builder tab without saving
+async function runBuilderTouchWorkflow() {
+  const workflowMode = document.getElementById('builderWorkflowMode').value;
+  const url = document.getElementById('builderUrl').value.trim();
+  const steps = builderSteps;
+  
+  if (workflowMode !== 'touch') {
+    addLog('Switch to Touch mode to run touch workflows', 'warn');
+    return;
+  }
+  
+  if (!steps || steps.length === 0) {
+    addLog('Please add at least one step to the workflow', 'error');
+    return;
+  }
+  
+  if (!url) {
+    addLog('Please enter a URL to navigate to', 'error');
+    return;
+  }
+  
+  addLog('▶ Running touch workflow from Builder...', 'info');
+  setRunning(true);
+  
+  try {
+    // Navigate to URL first
+    await fetch('/browser/navigate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    
+    addLog(`✅ Navigated to ${url}`, 'success');
+    
+    // Execute all steps
+    for (let i = 0; i < steps.length; i++) {
+      if (isRunning === false) {
+        addLog('⏹ Stopped by user', 'warn');
+        break;
+      }
+      
+      const step = steps[i];
+      updateProgress(i + 1, steps.length, step.label || step.action);
+      addLog(`⚙ Step ${i + 1}: ${step.label || step.action}`, 'info');
+      
+      try {
+        // Execute individual step actions
+        switch (step.action) {
+          case 'click':
+            await fetch('/browser/click', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ x: step.x, y: step.y })
+            });
+            break;
+          case 'type':
+            await fetch('/browser/type', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: step.text, delay: step.delay || 30 })
+            });
+            break;
+          case 'keypress':
+            await fetch('/browser/keypress', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ key: step.key })
+            });
+            break;
+          case 'scroll':
+            await fetch('/browser/scroll', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ deltaY: step.deltaY || 300 })
+            });
+            break;
+          case 'wait':
+            await fetch('/browser/wait', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ms: step.ms || 1000 })
+            });
+            break;
+          case 'copy':
+            await fetch('/browser/copy', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ selector: step.selector })
+            });
+            break;
+          case 'read':
+            await fetch('/browser/read', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ x: step.x, y: step.y })
+            });
+            break;
+        }
+        addLog(`  ✓ ${step.label || step.action}`, 'success');
+      } catch (stepErr) {
+        addLog(`  ✗ Error: ${stepErr.message}`, 'error');
+      }
+      
+      await new Promise(r => setTimeout(r, 80));
+    }
+    
+    addLog('✅ Touch workflow completed successfully', 'success');
+  } catch (e) {
+    addLog('Error: ' + e.message, 'error');
+  } finally {
+    setRunning(false);
+    hideProgress();
+  }
+}
+
 async function stopAutomation() {
   await fetch('/stop', { method: 'POST' });
   addLog('Stop requested', 'warn');
@@ -1152,6 +1267,7 @@ function updateWorkflowModeUI() {
   const touchModeBtns = document.getElementById('touchModeBtns');
   const jsModeBtns = document.getElementById('jsModeBtns');
   const builderExecuteJsBtn = document.getElementById('builderExecuteJsBtn');
+    const builderRunTouchBtn = document.getElementById('builderRunTouchBtn');
   
   if (builderWorkflowMode === 'js') {
     // JS Mode: show provider + source selector, hide steps
@@ -1165,6 +1281,7 @@ function updateWorkflowModeUI() {
     if (touchModeBtns) touchModeBtns.style.display = 'none';
     if (jsModeBtns) jsModeBtns.style.display = 'flex';
     if (builderExecuteJsBtn) builderExecuteJsBtn.style.display = 'inline-block';
+      if (builderRunTouchBtn) builderRunTouchBtn.style.display = 'none';
     if (document.getElementById('builderPromptGroup')) document.getElementById('builderPromptGroup').style.display = 'block';
     if (document.getElementById('builderResponseGroup')) document.getElementById('builderResponseGroup').style.display = 'block';
 
@@ -1187,6 +1304,7 @@ function updateWorkflowModeUI() {
     if (touchModeBtns) touchModeBtns.style.display = 'flex';
     if (jsModeBtns) jsModeBtns.style.display = 'none';
     if (builderExecuteJsBtn) builderExecuteJsBtn.style.display = 'none';
+    if (builderRunTouchBtn) builderRunTouchBtn.style.display = 'inline-block';
   }
 }
 
