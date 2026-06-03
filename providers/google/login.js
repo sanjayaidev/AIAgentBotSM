@@ -24,29 +24,11 @@
     return null;
   };
 
-  const findButtonByText = texts => {
-    const normalized = s => (s || '').toString().trim().toLowerCase();
-    const elements = [...document.querySelectorAll('button,div,input[type="button"],input[type="submit"],span')];
-    for (const el of elements) {
-      const text = normalized(el.textContent || el.value || el.getAttribute('aria-label'));
-      if (!text) continue;
-      for (const target of texts) {
-        if (text === target.toLowerCase()) return el;
-      }
-    }
-    return null;
-  };
+  const findInput = selectors => selectors
+    .map(selector => document.querySelector(selector))
+    .find(Boolean) || null;
 
-  const clickButton = (texts) => {
-    const button = findButtonByText(texts);
-    if (button) {
-      button.click();
-      button.dispatchEvent(new Event('click', { bubbles: true, cancelable: true }));
-      return true;
-    }
-    return false;
-  };
-
+  // Step 1: Email
   const emailInput = await waitForElement([
     'input[type="email"]',
     'input[name="identifier"]',
@@ -60,37 +42,29 @@
   setter.call(emailInput, email);
   emailInput.dispatchEvent(new Event('input', { bubbles: true }));
   emailInput.dispatchEvent(new Event('change', { bubbles: true }));
-  emailInput.focus();
+  
+  emailInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, keyCode: 13, which: 13 }));
+  emailInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, keyCode: 13, which: 13 }));
   
   console.log('✅ Email entered');
   
-  const nextClicked = clickButton(['Next', 'next', '下一步', 'Suivant', 'Weiter', '다음']);
-  if (!nextClicked) {
-    emailInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, keyCode: 13, which: 13 }));
-    emailInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, keyCode: 13, which: 13 }));
-  }
-
   // Step 2: Password
   const passwordInput = await waitForElement([
     'input[type="password"]',
     'input[name="password"]',
     'input[name="Passwd"]',
     'input[autocomplete="current-password"]'
-  ], 25000);
+  ], 20000);
   if (!passwordInput) throw new Error('Password input not found');
-
+  
   setter.call(passwordInput, password);
   passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
   passwordInput.dispatchEvent(new Event('change', { bubbles: true }));
-  passwordInput.focus();
+  
+  passwordInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, keyCode: 13, which: 13 }));
+  passwordInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, keyCode: 13, which: 13 }));
   
   console.log('✅ Password entered');
-  
-  const submitClicked = clickButton(['Next', 'next', 'Sign in', 'Sign in', '로그인', '로그인', 'Se connecter']);
-  if (!submitClicked) {
-    passwordInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, keyCode: 13, which: 13 }));
-    passwordInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true, keyCode: 13, which: 13 }));
-  }
   
   return 'Login successful - password submitted';
 })();
