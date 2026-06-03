@@ -1082,7 +1082,7 @@ function setupWorkflowModeSwitch() {
   const commandSelect = document.getElementById('builderCommand');
   if (commandSelect) {
     commandSelect.addEventListener('change', () => {
-      updateCommandOptions(document.getElementById('builderProvider')?.value);
+      updateCommandExtraFields();
     });
   }
 
