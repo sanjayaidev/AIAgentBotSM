@@ -469,7 +469,7 @@ async function ensureBrowser() {
   log(`Launching Chromium: ${exePath}`);
   browser = await puppeteerExtra.launch({
     executablePath: exePath,
-    headless: 'new',
+    headless: false,  // Use real browser mode for better compatibility
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
       '--disable-gpu', '--disable-background-networking',
@@ -1398,10 +1398,29 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
     
     log(`▶ Executing JS script for profile: ${profile}`);
     
-    // Execute the script
+    // Execute the script with better error handling and support for IIFE or function definitions
     const scriptResult = await page.evaluate(async (scriptCode, ctx) => {
-      const fn = eval(scriptCode);
-      return await fn(ctx);
+      try {
+        const result = eval(scriptCode);
+        
+        // If result is a promise, await it
+        if (result && typeof result.then === 'function') {
+          return await result;
+        }
+        
+        // If result is a function, call it with context
+        if (typeof result === 'function') {
+          const fnResult = result(ctx);
+          if (fnResult && typeof fnResult.then === 'function') {
+            return await fnResult;
+          }
+          return fnResult;
+        }
+        
+        return result;
+      } catch (evalErr) {
+        throw new Error(`Script execution error: ${evalErr.message}`);
+      }
     }, profileData.script, context);
     
     log(`✅ JS script executed successfully`);
@@ -1460,10 +1479,29 @@ app.post('/execute-js-direct', requireApiKey, async (req, res) => {
     
     log(`▶ Executing JS script directly from Builder`);
     
-    // Execute the script
+    // Execute the script with better error handling and support for IIFE or function definitions
     const scriptResult = await page.evaluate(async (scriptCode, ctx) => {
-      const fn = eval(scriptCode);
-      return await fn(ctx);
+      try {
+        const result = eval(scriptCode);
+        
+        // If result is a promise, await it
+        if (result && typeof result.then === 'function') {
+          return await result;
+        }
+        
+        // If result is a function, call it with context
+        if (typeof result === 'function') {
+          const fnResult = result(ctx);
+          if (fnResult && typeof fnResult.then === 'function') {
+            return await fnResult;
+          }
+          return fnResult;
+        }
+        
+        return result;
+      } catch (evalErr) {
+        throw new Error(`Script execution error: ${evalErr.message}`);
+      }
     }, script, context);
     
     log(`✅ JS script executed successfully`);
@@ -1578,20 +1616,34 @@ async function executeProviderCommand(provider, command, context) {
   
   const scriptContent = fs.readFileSync(commandPath, 'utf8');
   
-  // Extract the async function from the script file
-  // Scripts are expected to be in format: (async (context) => { ... })()
-  // or just the function body
-  
   try {
-    // Evaluate and execute the script in the browser context
+    // Execute the script in the browser context
+    // The script should be an IIFE or async function that receives context
     const result = await page.evaluate(async (scriptCode, ctx) => {
-      // Create a function from the script and execute it
-      const fn = eval(scriptCode);
-      // If it's an IIFE that returns a promise, await it
-      if (fn && typeof fn.then === 'function') {
-        return await fn;
+      try {
+        // Try to evaluate and execute the script
+        // If it's an IIFE like (async (ctx) => {...})(), eval will execute it
+        // If it's just a function definition, we need to call it
+        const result = eval(scriptCode);
+        
+        // If result is a promise, await it
+        if (result && typeof result.then === 'function') {
+          return await result;
+        }
+        
+        // If result is a function, call it with context
+        if (typeof result === 'function') {
+          const fnResult = result(ctx);
+          if (fnResult && typeof fnResult.then === 'function') {
+            return await fnResult;
+          }
+          return fnResult;
+        }
+        
+        return result;
+      } catch (evalErr) {
+        throw new Error(`Script execution error: ${evalErr.message}`);
       }
-      return fn;
     }, scriptContent, context);
     
     log(`✅ Command ${command} executed for ${provider}`);
