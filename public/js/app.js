@@ -1343,8 +1343,8 @@ function updateCommandOptions(provider) {
   // Load available commands for this provider
   const commands = {
     deepseek: ['newchat', 'gotochat', 'getchats', 'prompt', 'login'],
-    qwen: ['newchat', 'gotochat', 'getchats', 'prompt', 'qwenimage', 'qwenvideo'],
-    chatgpt: ['newchat', 'gotochat', 'getchats', 'prompt'],
+    qwen: ['newchat', 'gotochat', 'getchats', 'prompt', 'qwenimage', 'qwenvideo', 'login'],
+    chatgpt: ['newchat', 'gotochat', 'getchats', 'prompt', 'login'],
     claude: ['newchat', 'gotochat', 'getchats', 'promptui'],
     gemini: ['newchat', 'gotochat', 'getchats'],
     google: ['login', '2fa']
@@ -1355,7 +1355,7 @@ function updateCommandOptions(provider) {
     cmds.map(c => `<option value="${c}">${c}</option>`).join('');
   
   // Show credentials row for providers that support login
-  const providersWithLogin = ['deepseek', 'google'];
+  const providersWithLogin = ['deepseek', 'qwen', 'chatgpt', 'google'];
   if (credentialsRow) {
     credentialsRow.style.display = providersWithLogin.includes(provider) ? 'flex' : 'none';
   }

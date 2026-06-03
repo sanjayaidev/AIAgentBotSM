@@ -1,1 +1,18 @@
-Nothing should be ignored based on the provided file changes. The added files are all JavaScript source files in a structured directory format, which are legitimate project files that should be tracked by git. No build artifacts, dependencies, temporary files, or other ignorable items are present in the change list.
+```
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Original rules preserved
+*.log
+```
