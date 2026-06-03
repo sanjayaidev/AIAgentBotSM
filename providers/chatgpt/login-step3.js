@@ -4,6 +4,11 @@
 
 (async (context = {}) => {
   const totp = context.totp || '';
+  // Ensure we are on the correct URL (Google 2FA page)
+  if (!window.location.href.includes('accounts.google.com')) {
+    throw new Error('Not on Google 2FA page. Complete steps 1 and 2 first.');
+  }
+
 
   if (!totp) {
     throw new Error('TOTP code is required for step 3');

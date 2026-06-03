@@ -4,6 +4,13 @@
 
 (async (context = {}) => {
   const password = context.password || '';
+  // Ensure we are on the correct URL
+  if (!window.location.href.includes('accounts.google.com') && !window.location.href.includes('chatgpt.com')) {
+    // Stay on Google page if already there, otherwise navigate to chatgpt.com first
+    window.location.href = 'https://chatgpt.com';
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
 
   if (!password) {
     throw new Error('Password is required for step 2');

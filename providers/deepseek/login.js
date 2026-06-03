@@ -9,6 +9,12 @@
   const email = context.email || '';
   const password = context.password || '';
 
+  // Ensure we're on the correct URL
+  if (!window.location.href.includes('chat.deepseek.com')) {
+    window.location.href = 'https://chat.deepseek.com';
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
   if (!email || !password) throw new Error('Email and password required');
 
   const setInputValue = (input, value) => {

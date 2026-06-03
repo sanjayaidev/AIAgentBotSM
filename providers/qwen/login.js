@@ -2,6 +2,12 @@
   const email = context.email || '';
   const password = context.password || '';
   
+  // Ensure we are on the correct URL
+  if (!window.location.href.includes('chat.qwen.ai')) {
+    window.location.href = 'https://chat.qwen.ai';
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
   if (!email || !password) {
     throw new Error('Email and password required');
   }

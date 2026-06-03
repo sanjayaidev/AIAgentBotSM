@@ -620,9 +620,33 @@ async function runJsThroughAppUI({ runMode, script, provider, command, prompt, c
     await setAppUiElement(page, '#builderScript', script || '');
   }
 
+  // Navigate to provider URL FIRST before setting dropdowns
   if (provider) {
+    const providersConfig = {
+      deepseek: 'https://chat.deepseek.com',
+      chatgpt: 'https://chatgpt.com',
+      qwen: 'https://chat.qwen.ai',
+      claude: 'https://claude.ai',
+      gemini: 'https://gemini.google.com',
+      perplexity: 'https://www.perplexity.ai',
+      grok: 'https://grok.x.ai',
+      llama: 'https://llama.meta.com',
+      mistral: 'https://chat.mistral.ai',
+      copilot: 'https://copilot.microsoft.com'
+    };
+    
+    const providerUrl = providersConfig[provider];
+    if (providerUrl) {
+      log(`🌐 Navigating to ${providerUrl} for ${provider}`);
+      await page.goto(providerUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.waitForTimeout(3000); // Wait for page to fully load
+    }
+    
+    // Now go back to builder tab and set provider
+    await page.click('.tab[data-tab="builder"]');
+    await page.waitForTimeout(500);
     await setAppUiElement(page, '#builderProvider', provider, true);
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(500);
   }
 
   if (command) {

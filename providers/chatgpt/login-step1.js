@@ -4,6 +4,12 @@
 (async (context = {}) => {
   const email = context.email || '';
 
+  // Ensure we are on the correct URL
+  if (!window.location.href.includes('chatgpt.com')) {
+    window.location.href = 'https://chatgpt.com';
+    await new Promise(r => setTimeout(r, 3000));
+  }
+
   if (!email) {
     throw new Error('Email is required for step 1');
   }
