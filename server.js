@@ -777,7 +777,17 @@ async function runProfile(profileName, prompt) {
   const runStart = Date.now();
   let runStatus = 'success';
   let runError = null;
-  const context = { prompt, result: '', workflowMode: profile.workflowMode || 'js' };
+  const context = {
+    prompt,
+    message: prompt || '',
+    result: '',
+    workflowMode: profile.workflowMode || 'js',
+    provider: profile.provider || null,
+    command: profile.command || null,
+    chatIndex: profile.chatIndex || '0',
+    imageSize: profile.imageSize || null,
+    videoSize: profile.videoSize || null
+  };
   try {
     log(`▶ Starting: ${profileName} [${profile.workflowMode || 'js'} mode]`);
     broadcast('status', { running: true });

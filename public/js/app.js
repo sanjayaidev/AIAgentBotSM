@@ -478,7 +478,15 @@ async function executeJSScriptFromBuilder() {
       body: JSON.stringify({
         runMode: scriptSource,
         script: scriptSource === 'custom' ? script : '',
-        context: { provider, command, prompt: prompt || '', credentials: { email, password, apiKey } }
+        context: {
+          provider,
+          command,
+          prompt: prompt || '',
+          chatIndex: document.getElementById('builderChatIndex')?.value || '0',
+          imageSize: document.getElementById('builderMediaSize')?.value || '',
+          videoSize: document.getElementById('builderMediaSize')?.value || '',
+          credentials: { email, password, apiKey }
+        }
       })
     });
     
@@ -626,7 +634,6 @@ function loadBuilderFromProfile(profile) {
   if (workflowMode === 'js') {
     // JS mode: load provider, command, script source and code
     if (profile.provider) document.getElementById('builderProvider').value = profile.provider;
-    if (profile.command) document.getElementById('builderCommand').value = profile.command;
     if (profile.scriptSource) {
       builderScriptSource = profile.scriptSource;
       document.getElementById('builderScriptSource').value = profile.scriptSource;
@@ -636,6 +643,16 @@ function loadBuilderFromProfile(profile) {
     }
     if (profile.script) document.getElementById('builderScript').value = profile.script;
     updateCommandOptions(profile.provider);
+    if (profile.command) document.getElementById('builderCommand').value = profile.command;
+    if (profile.chatIndex !== undefined && document.getElementById('builderChatIndex')) {
+      document.getElementById('builderChatIndex').value = profile.chatIndex;
+    }
+    if (profile.imageSize && document.getElementById('builderMediaSize')) {
+      document.getElementById('builderMediaSize').value = profile.imageSize;
+    }
+    if (profile.videoSize && document.getElementById('builderMediaSize')) {
+      document.getElementById('builderMediaSize').value = profile.videoSize;
+    }
     updateWorkflowModeUI();
   } else {
     // Touch mode: load steps
@@ -692,6 +709,9 @@ async function saveBuilderProfile() {
     payload.command = document.getElementById('builderCommand').value;
     payload.scriptSource = document.getElementById('builderScriptSource')?.value || 'provider';
     payload.script = payload.scriptSource === 'custom' ? document.getElementById('builderScript').value : '';
+    payload.chatIndex = document.getElementById('builderChatIndex')?.value || '0';
+    payload.imageSize = document.getElementById('builderMediaSize')?.value || '';
+    payload.videoSize = document.getElementById('builderMediaSize')?.value || '';
     payload.steps = []; // No steps in JS mode
   }
   
@@ -1059,6 +1079,13 @@ function setupWorkflowModeSwitch() {
     });
   }
 
+  const commandSelect = document.getElementById('builderCommand');
+  if (commandSelect) {
+    commandSelect.addEventListener('change', () => {
+      updateCommandOptions(document.getElementById('builderProvider')?.value);
+    });
+  }
+
   const scriptSourceSelect = document.getElementById('builderScriptSource');
   if (scriptSourceSelect) {
     scriptSourceSelect.addEventListener('change', () => {
@@ -1084,9 +1111,24 @@ function updateScriptSourceUI() {
   }
 }
 
+function updateCommandExtraFields() {
+  const command = document.getElementById('builderCommand')?.value;
+  const chatIndexRow = document.getElementById('chatIndexRow');
+  const qwenMediaSizeRow = document.getElementById('qwenMediaSizeRow');
+
+  if (chatIndexRow) {
+    chatIndexRow.style.display = command === 'gotochat' ? 'flex' : 'none';
+  }
+  if (qwenMediaSizeRow) {
+    qwenMediaSizeRow.style.display = ['qwenimage', 'qwenvideo'].includes(command) ? 'flex' : 'none';
+  }
+}
+
 function updateWorkflowModeUI() {
   const providerRow = document.getElementById('providerRow');
   const commandRow = document.getElementById('commandRow');
+  const chatIndexRow = document.getElementById('chatIndexRow');
+  const qwenMediaSizeRow = document.getElementById('qwenMediaSizeRow');
   const scriptSourceRow = document.getElementById('scriptSourceRow');
   const scriptRow = document.getElementById('scriptRow');
   const credentialsRow = document.getElementById('credentialsRow');
@@ -1099,6 +1141,9 @@ function updateWorkflowModeUI() {
   if (builderWorkflowMode === 'js') {
     // JS Mode: show provider + source selector, hide steps
     if (providerRow) providerRow.style.display = 'flex';
+    if (commandRow) commandRow.style.display = 'flex';
+    if (chatIndexRow) chatIndexRow.style.display = 'none';
+    if (qwenMediaSizeRow) qwenMediaSizeRow.style.display = 'none';
     if (scriptSourceRow) scriptSourceRow.style.display = 'flex';
     if (stepsHeader) stepsHeader.style.display = 'none';
     if (stepsList) stepsList.style.display = 'none';
@@ -1109,6 +1154,7 @@ function updateWorkflowModeUI() {
     if (document.getElementById('builderResponseGroup')) document.getElementById('builderResponseGroup').style.display = 'block';
 
     updateScriptSourceUI();
+    updateCommandExtraFields();
     const selectedProvider = document.getElementById('builderProvider')?.value;
     if (credentialsRow) credentialsRow.style.display = selectedProvider ? 'flex' : 'none';
   } else {
@@ -1156,6 +1202,9 @@ function updateCommandOptions(provider) {
   if (credentialsRow) {
     credentialsRow.style.display = providersWithLogin.includes(provider) ? 'flex' : 'none';
   }
+  
+  // Update any command-specific helper controls
+  updateCommandExtraFields();
   
   // Load saved credentials for this provider
   loadProviderCredentials(provider);

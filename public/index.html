@@ -235,6 +235,25 @@
               <option value="getchats">Get Chats</option>
               <option value="prompt">Send Prompt</option>
               <option value="login">Login</option>
+              <option value="qwenimage">Generate Image</option>
+              <option value="qwenvideo">Generate Video</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row" id="chatIndexRow" style="display:none;">
+          <label style="flex:1; font-size:12px; color:#aaa;">
+            Chat Index
+            <input type="number" id="builderChatIndex" min="0" placeholder="0" style="width:100%; margin-top:4px;" />
+          </label>
+        </div>
+        <div class="field-row" id="qwenMediaSizeRow" style="display:none;">
+          <label style="flex:1; font-size:12px; color:#aaa;">
+            Qwen Media Ratio
+            <select id="builderMediaSize" style="width:100%; margin-top:4px;">
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
             </select>
           </label>
         </div>
