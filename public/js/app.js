@@ -293,6 +293,27 @@ async function loadProfiles() {
   }
 }
 
+// Load profiles into Automation dropdown and select current workflow
+function loadAutomationProfiles() {
+  const sel = document.getElementById('profileSelect');
+  if (!sel) return;
+  
+  // Select the currently active workflow in builder if it matches a saved profile
+  const currentName = document.getElementById('builderName')?.value.trim();
+  if (currentName && profiles.find(p => p.name === currentName)) {
+    sel.value = currentName;
+  } else if (profiles.length > 0) {
+    sel.value = profiles[0].name;
+  }
+  
+  // Auto-load the selected workflow
+  const selectedProfile = profiles.find(p => p.name === sel.value);
+  if (selectedProfile) {
+    loadBuilderFromProfile(selectedProfile);
+    updateProfileEndpoint(selectedProfile);
+  }
+}
+
 function updateProfileEndpoint(profile) {
   const endpoint = profile?.slug ? `/run/${profile.slug}` : '/run/<profile-slug>';
   const el = document.getElementById('profileEndpoint');
@@ -319,17 +340,30 @@ async function loadEndpointDocs() {
 
 function renderProfileSelect() {
   const sel = document.getElementById('profileSelect');
+  if (!sel) return;
+  
   const cur = sel.value;
   sel.innerHTML = profiles.map(p =>
     `<option value="${escHtml(p.name)}">${escHtml(p.name)}</option>`
   ).join('');
-  if (cur && profiles.find(p => p.name === cur)) sel.value = cur;
+  
+  // Keep current selection or default to first
+  if (cur && profiles.find(p => p.name === cur)) {
+    sel.value = cur;
+  } else if (profiles.length > 0) {
+    sel.value = profiles[0].name;
+  }
+  
   const selected = profiles.find(p => p.name === sel.value) || profiles[0];
   updateProfileEndpoint(selected);
   
+  // Remove old listeners and add new one
+  const newSel = sel.cloneNode(true);
+  sel.parentNode.replaceChild(newSel, sel);
+  
   // Auto-load workflow when profile selection changes in Automation tab
-  sel.addEventListener('change', () => {
-    const profile = profiles.find(p => p.name === sel.value);
+  newSel.addEventListener('change', () => {
+    const profile = profiles.find(p => p.name === newSel.value);
     if (profile) {
       loadBuilderFromProfile(profile);
       updateProfileEndpoint(profile);
@@ -478,15 +512,36 @@ function loadBuilderFromProfile(profile) {
 
 function loadBuilderProfile() {
   const name = document.getElementById('builderName').value.trim();
-  const p = profiles.find(p => p.name === name);
-  if (p) loadBuilderFromProfile(p);
-  else addLog(`Profile "${name}" not found`, 'warn');
+  if (name) {
+    const p = profiles.find(p => p.name === name);
+    if (p) loadBuilderFromProfile(p);
+    else addLog(`Profile "${name}" not found`, 'warn');
+  } else {
+    // Show list of all profiles to choose from
+    if (profiles.length === 0) {
+      addLog('No saved profiles found', 'warn');
+      return;
+    }
+    const profileNames = profiles.map(p => p.name).join('\n');
+    const selected = prompt(`Enter profile name to load:\n\n${profileNames}`);
+    if (selected) {
+      const p = profiles.find(profile => profile.name === selected);
+      if (p) {
+        loadBuilderFromProfile(p);
+        addLog(`Loaded profile "${selected}"`, 'success');
+      } else {
+        addLog(`Profile "${selected}" not found`, 'error');
+      }
+    }
+  }
 }
 
 async function saveBuilderProfile() {
-  const name = document.getElementById('builderName').value.trim();
+  const nameInput = prompt('Enter profile name:');
+  if (!nameInput) return;
+  const name = nameInput.trim();
+  
   const url = document.getElementById('builderUrl').value.trim();
-  if (!name) { addLog('Enter a profile name', 'warn'); return; }
   
   const workflowMode = document.getElementById('builderWorkflowMode').value;
   const payload = { 
@@ -510,7 +565,7 @@ async function saveBuilderProfile() {
     body: JSON.stringify(payload)
   });
   if (r.ok) {
-    addLog(`Profile "${name}" saved`, 'info');
+    addLog(`Profile "${name}" saved`, 'success');
     await loadProfiles();
     const result = await r.json();
     const profile = profiles.find(p => p.slug === result.slug || p.name === name);

@@ -109,11 +109,13 @@ async function saveProfilesToDb(profiles) {
   try {
     for (const profile of sanitized) {
       await dbClient.query(
-        `INSERT INTO profiles (slug, name, url, workflow_mode, steps, updated_at)
-         VALUES ($1, $2, $3, $4, $5, now())
+        `INSERT INTO profiles (slug, name, url, workflow_mode, steps, provider, command, script, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
          ON CONFLICT (slug) DO UPDATE
-         SET name = EXCLUDED.name, url = EXCLUDED.url, workflow_mode = EXCLUDED.workflow_mode, steps = EXCLUDED.steps, updated_at = now()`,
-        [profile.slug, profile.name, profile.url, profile.workflowMode, profile.steps]
+         SET name = EXCLUDED.name, url = EXCLUDED.url, workflow_mode = EXCLUDED.workflow_mode, 
+             steps = EXCLUDED.steps, provider = EXCLUDED.provider, command = EXCLUDED.command, 
+             script = EXCLUDED.script, updated_at = now()`,
+        [profile.slug, profile.name, profile.url, profile.workflowMode, profile.steps, profile.provider, profile.command, profile.script]
       );
     }
     const slugs = sanitized.map(p => p.slug);
