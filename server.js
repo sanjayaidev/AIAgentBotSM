@@ -620,31 +620,8 @@ async function runJsThroughAppUI({ runMode, script, provider, command, prompt, c
     await setAppUiElement(page, '#builderScript', script || '');
   }
 
-  // Navigate to provider URL FIRST before setting dropdowns
+  // Set provider and command in builder UI
   if (provider) {
-    const providersConfig = {
-      deepseek: 'https://chat.deepseek.com',
-      chatgpt: 'https://chatgpt.com',
-      qwen: 'https://chat.qwen.ai',
-      claude: 'https://claude.ai',
-      gemini: 'https://gemini.google.com',
-      perplexity: 'https://www.perplexity.ai',
-      grok: 'https://grok.x.ai',
-      llama: 'https://llama.meta.com',
-      mistral: 'https://chat.mistral.ai',
-      copilot: 'https://copilot.microsoft.com'
-    };
-    
-    const providerUrl = providersConfig[provider];
-    if (providerUrl) {
-      log(`🌐 Navigating to ${providerUrl} for ${provider}`);
-      await page.goto(providerUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForTimeout(3000); // Wait for page to fully load
-    }
-    
-    // Now go back to builder tab and set provider
-    await page.click('.tab[data-tab="builder"]');
-    await page.waitForTimeout(500);
     await setAppUiElement(page, '#builderProvider', provider, true);
     await page.waitForTimeout(500);
   }
@@ -666,10 +643,12 @@ async function runJsThroughAppUI({ runMode, script, provider, command, prompt, c
   if (videoSize) await setAppUiElement(page, '#builderMediaSize', videoSize, true);
   if (code) await setAppUiElement(page, '#builderGoogle2FACode', code);
 
+  // Click execute - this will open provider tab automatically
   await page.waitForSelector('#builderExecuteJsBtn', { visible: true, timeout: 10000 });
   await page.click('#builderExecuteJsBtn');
   log('▶ Clicked builder UI execute button');
 
+  // Wait for output in builder tab (script runs in new tab opened by UI)
   await page.waitForFunction(() => {
     const box = document.getElementById('builderResponseBox');
     if (!box) return false;
