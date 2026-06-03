@@ -376,7 +376,11 @@ function renderProfileSelect() {
 
 // ── AUTOMATION ────────────────────────────────────────────
 async function runAutomation() {
-  const profileName = document.getElementById('profileSelect').value;
+  const profileSelect = document.getElementById('profileSelect');
+  let profileName = profileSelect?.value || '';
+  if (!profileName) {
+    profileName = document.getElementById('builderName')?.value.trim() || '';
+  }
   const prompt = document.getElementById('promptInput').value.trim();
   
   // Get the selected profile to check its workflow mode
@@ -659,6 +663,13 @@ function loadBuilderFromProfile(profile) {
     builderSteps = JSON.parse(JSON.stringify(profile.steps || []));
     renderStepsList();
     renderBuilderMarkers();
+    updateWorkflowModeUI();
+  }
+  // Keep automation profile selector in sync with the builder
+  const profileSelect = document.getElementById('profileSelect');
+  if (profileSelect) {
+    profileSelect.value = profile.name;
+    updateProfileEndpoint(profile);
   }
 }
 
@@ -722,10 +733,15 @@ async function saveBuilderProfile() {
   });
   if (r.ok) {
     addLog(`Profile "${name}" saved`, 'success');
-    await loadProfiles();
     const result = await r.json();
+    await loadProfiles();
     const profile = profiles.find(p => p.slug === result.slug || p.name === name);
-    if (profile) updateProfileEndpoint(profile);
+    if (profile) {
+      const profileSelect = document.getElementById('profileSelect');
+      if (profileSelect) profileSelect.value = profile.name;
+      updateProfileEndpoint(profile);
+      loadBuilderFromProfile(profile);
+    }
     // Keep current workflow visible - don't reset
     document.getElementById('builderName').value = name;
   } else {
