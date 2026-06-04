@@ -2,10 +2,7 @@
   const email = context.email || '';
   const password = context.password || '';
   
-  // Navigate directly to auth page
-  window.location.href = 'https://chat.qwen.ai/auth';
-  
-  // Wait for page to fully load by checking for auth form elements
+  // Wait for auth page to fully load by checking for auth form elements
   console.log('Waiting for auth page to load...');
   await new Promise((resolve) => {
     const checkPageLoaded = () => {
@@ -83,8 +80,8 @@
     
     if (!currentEmailInput && !currentSubmitBtn) {
       // Double check for user presence
-      const userAvatar = document.querySelector('div[class*="user-avatar"]') || document.querySelector('button[data-testid="user-avatar"]');
-      if (userAvatar) {
+      const finalUserAvatar = document.querySelector('div[class*="user-avatar"]') || document.querySelector('button[data-testid="user-avatar"]');
+      if (finalUserAvatar) {
         return { ok: true, message: 'Login successful' };
       }
       // If form is gone but no avatar, might be loading or 2FA
@@ -95,8 +92,8 @@
   }
 
   // Final check
-  const userAvatar = document.querySelector('div[class*="user-avatar"]') || document.querySelector('button[data-testid="user-avatar"]');
-  if (userAvatar) {
+  const finalUserAvatarCheck = document.querySelector('div[class*="user-avatar"]') || document.querySelector('button[data-testid="user-avatar"]');
+  if (finalUserAvatarCheck) {
     return { ok: true, message: 'Login successful' };
   }
 

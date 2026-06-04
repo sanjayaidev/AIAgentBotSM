@@ -542,10 +542,29 @@ async function navigateToProviderBaseUrl(provider, command) {
   const validHosts = PROVIDER_VALID_HOSTNAMES[provider] || [new URL(baseUrl).hostname];
   let currentUrl = '';
   try { currentUrl = page.url(); } catch (_) {}
-  if (!validHosts.some(host => currentUrl.includes(host))) {
-    log(`Navigating to provider base URL for ${provider}: ${baseUrl}`);
-    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await new Promise(r => setTimeout(r, 2000));
+  
+  // Check if we're already on a valid provider URL
+  const isOnValidUrl = validHosts.some(host => currentUrl.includes(host));
+  
+  // For login commands, always navigate to ensure we're on the auth page
+  if (command === 'login') {
+    if (!isOnValidUrl || (provider === 'qwen' && !currentUrl.includes('/auth'))) {
+      log(`Navigating to provider base URL for ${provider} login: ${baseUrl}`);
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await new Promise(r => setTimeout(r, 2000));
+    } else {
+      log(`Already on valid URL for ${provider} login: ${currentUrl}`);
+    }
+  } 
+  // For non-login commands (chat, etc.), only navigate if not already on a valid URL
+  else {
+    if (!isOnValidUrl) {
+      log(`Navigating to provider base URL for ${provider}: ${baseUrl}`);
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await new Promise(r => setTimeout(r, 2000));
+    } else {
+      log(`Already on valid URL for ${provider}: ${currentUrl}, skipping navigation`);
+    }
   }
 }
 
