@@ -532,8 +532,12 @@ const PROVIDER_VALID_HOSTNAMES = {
   google: ['accounts.google.com']
 };
 
-async function navigateToProviderBaseUrl(provider) {
-  const baseUrl = PROVIDER_BASE_URLS[provider];
+async function navigateToProviderBaseUrl(provider, command) {
+  let baseUrl = PROVIDER_BASE_URLS[provider];
+  // Special case: navigate directly to auth page for qwen login
+  if (provider === 'qwen' && command === 'login') {
+    baseUrl = 'https://chat.qwen.ai/auth';
+  }
   if (!baseUrl) return;
   const validHosts = PROVIDER_VALID_HOSTNAMES[provider] || [new URL(baseUrl).hostname];
   let currentUrl = '';
@@ -586,7 +590,7 @@ async function executeProviderScript(provider, command, context) {
   if (!fs.existsSync(commandPath)) throw new Error(`Command script not found: ${commandPath}`);
   const scriptContent = fs.readFileSync(commandPath, 'utf8');
   await ensurePage();
-  await navigateToProviderBaseUrl(provider);
+  await navigateToProviderBaseUrl(provider, command);
   try {
     return await evaluateScriptContent(scriptContent, context);
   } catch (err) {
@@ -594,7 +598,7 @@ async function executeProviderScript(provider, command, context) {
     if (msg.includes('execution context was destroyed') || msg.includes('cannot find context with specified id')) {
       log(`⚠️ Provider script ${provider}/${command} triggered navigation; retrying`);
       await ensurePage();
-      await navigateToProviderBaseUrl(provider);
+      await navigateToProviderBaseUrl(provider, command);
       return await evaluateScriptContent(scriptContent, context);
     }
     throw err;
