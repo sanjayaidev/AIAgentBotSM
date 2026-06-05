@@ -1731,7 +1731,15 @@ app.get('/logs/stream', (req, res) => {
   logClients.add(res);
   req.on('close', () => logClients.delete(res));
 });
-
+app.post('/browser/set-cookies', requireApiKey, async (req, res) => {
+  try {
+    const { cookies } = req.body;
+    if (!cookies || !Array.isArray(cookies)) return res.status(400).json({ error: 'cookies array required' });
+    await ensurePage();
+    await page.setCookie(...cookies);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ── STARTUP ───────────────────────────────────────────────
 (async () => {
   try {
