@@ -519,20 +519,12 @@ function installAnalyticsInterceptor(pg) {
 // ── PROVIDER HELPERS ──────────────────────────────────────
 const PROVIDER_BASE_URLS = {
   deepseek: 'https://chat.deepseek.com',
-  qwen: 'https://chat.qwen.ai',
-  chatgpt: 'https://chatgpt.com',
-  claude: 'https://claude.ai',
-  gemini: 'https://gemini.google.com',
-  google: 'https://accounts.google.com'
+  qwen: 'https://chat.qwen.ai'
 };
 
 const PROVIDER_VALID_HOSTNAMES = {
   deepseek: ['chat.deepseek.com'],
-  qwen: ['chat.qwen.ai', 'qwen.ai', 'tongyi.aliyun.com', 'qianwen.aliyun.com'],
-  chatgpt: ['chatgpt.com'],
-  claude: ['claude.ai'],
-  gemini: ['gemini.google.com'],
-  google: ['accounts.google.com']
+  qwen: ['chat.qwen.ai', 'qwen.ai', 'tongyi.aliyun.com', 'qianwen.aliyun.com']
 };
 
 async function navigateToProviderBaseUrl(provider, command) {
