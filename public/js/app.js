@@ -501,7 +501,6 @@ async function executeJSScriptFromBuilder() {
           chatIndex: document.getElementById('builderChatIndex')?.value || '0',
           imageSize: document.getElementById('builderMediaSize')?.value || '',
           videoSize: document.getElementById('builderMediaSize')?.value || '',
-          code: document.getElementById('builderGoogle2FACode')?.value || '',
           credentials: { email, password, apiKey }
         }
       })
@@ -1264,16 +1263,12 @@ function updateCommandExtraFields() {
   const command = document.getElementById('builderCommand')?.value;
   const chatIndexRow = document.getElementById('chatIndexRow');
   const qwenMediaSizeRow = document.getElementById('qwenMediaSizeRow');
-  const google2faRow = document.getElementById('google2faRow');
 
   if (chatIndexRow) {
     chatIndexRow.style.display = command === 'gotochat' ? 'flex' : 'none';
   }
   if (qwenMediaSizeRow) {
     qwenMediaSizeRow.style.display = ['qwenimage', 'qwenvideo'].includes(command) ? 'flex' : 'none';
-  }
-  if (google2faRow) {
-    google2faRow.style.display = command === '2fa' ? 'flex' : 'none';
   }
 }
 
@@ -1343,11 +1338,7 @@ function updateCommandOptions(provider) {
   // Load available commands for this provider
   const commands = {
     deepseek: ['newchat', 'gotochat', 'getchats', 'prompt', 'login'],
-    qwen: ['newchat', 'gotochat', 'getchats', 'prompt', 'qwenimage', 'qwenvideo', 'login'],
-    chatgpt: ['newchat', 'gotochat', 'getchats', 'prompt', 'login'],
-    claude: ['newchat', 'gotochat', 'getchats', 'promptui'],
-    gemini: ['newchat', 'gotochat', 'getchats'],
-    google: ['login', '2fa']
+    qwen: ['newchat', 'gotochat', 'getchats', 'prompt', 'qwenimage', 'qwenvideo', 'login']
   };
   
   const cmds = commands[provider] || [];
@@ -1355,7 +1346,7 @@ function updateCommandOptions(provider) {
     cmds.map(c => `<option value="${c}">${c}</option>`).join('');
   
   // Show credentials row for providers that support login
-  const providersWithLogin = ['deepseek', 'qwen', 'chatgpt', 'google'];
+  const providersWithLogin = ['deepseek', 'qwen'];
   if (credentialsRow) {
     credentialsRow.style.display = providersWithLogin.includes(provider) ? 'flex' : 'none';
   }
