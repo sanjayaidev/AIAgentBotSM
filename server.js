@@ -4,6 +4,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { Client, Pool } = require('pg');
+const { google } = require('googleapis');
 const { uploadVideoToGoogleDrive, validateGoogleDriveCredentials } = require('./lib/google-drive');
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1580,6 +1581,114 @@ app.post('/api/upload-to-drive', requireApiKey, async (req, res) => {
     res.status(500).json({ 
       error: error.message,
       details: 'Failed to upload video to Google Drive'
+    });
+  }
+});
+
+// ── PUBLIC GOOGLE DRIVE UPLOAD ENDPOINT (No Auth Required) ─────────────────────────
+// Anyone can use this endpoint to upload videos to Google Drive
+app.post('/api/public/upload-to-drive', async (req, res) => {
+  try {
+    const { videoUrl, filename, credentials } = req.body;
+    
+    if (!videoUrl || !filename || !credentials) {
+      return res.status(400).json({ 
+        error: 'Missing required parameters',
+        required: ['videoUrl', 'filename', 'credentials'],
+        example: {
+          videoUrl: 'https://example.com/video.mp4',
+          filename: 'my-video.mp4',
+          credentials: { /* Google Service Account JSON */ }
+        }
+      });
+    }
+    
+    // Validate credentials
+    const isValid = await validateGoogleDriveCredentials(credentials);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid Google Drive credentials' });
+    }
+    
+    log(`📤 [Public] Uploading video to Google Drive: ${filename}`);
+    
+    // Upload video to Google Drive
+    const shareableLink = await uploadVideoToGoogleDrive(videoUrl, filename, credentials);
+    
+    log(`✅ [Public] Video uploaded to Google Drive: ${shareableLink}`);
+    
+    res.json({ 
+      success: true, 
+      shareableLink,
+      directStreamUrl: `https://drive.google.com/uc?export=download&id=${shareableLink.match(/\/file\/d\/([^\/]+)/)?.[1] || ''}`,
+      originalUrl: videoUrl,
+      message: 'Video successfully uploaded to Google Drive'
+    });
+  } catch (error) {
+    log(`❌ [Public] Google Drive upload failed: ${error.message}`, 'error');
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to upload video to Google Drive',
+      help: 'Ensure your Google Service Account has Drive API enabled and proper permissions'
+    });
+  }
+});
+
+// ── PUBLIC ENDPOINT TO GET SHAREABLE LINK FROM VIDEO.JS ─────────────────────────
+// Helper endpoint for Video.js integration
+app.get('/api/public/drive-link/:fileId', async (req, res) => {
+  try {
+    const { fileId } = req.params;
+    const { credentials } = req.query;
+    
+    if (!fileId) {
+      return res.status(400).json({ error: 'fileId is required' });
+    }
+    
+    if (!credentials) {
+      return res.status(400).json({ 
+        error: 'credentials query parameter is required',
+        hint: 'Pass Google Service Account credentials as JSON string'
+      });
+    }
+    
+    const creds = typeof credentials === 'string' ? JSON.parse(credentials) : credentials;
+    const isValid = await validateGoogleDriveCredentials(creds);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid Google Drive credentials' });
+    }
+    
+    const auth = new google.auth.GoogleAuth({
+      credentials: creds,
+      scopes: ['https://www.googleapis.com/auth/drive.file']
+    });
+    
+    const drive = google.drive({ version: 'v3', auth });
+    
+    // Make file publicly accessible
+    await drive.permissions.create({
+      fileId: fileId,
+      requestBody: {
+        role: 'reader',
+        type: 'anyone'
+      },
+      fields: 'id'
+    });
+    
+    const shareableLink = `https://drive.google.com/file/d/${fileId}/view`;
+    const directStreamUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+    
+    res.json({
+      success: true,
+      fileId,
+      shareableLink,
+      directStreamUrl,
+      embedUrl: `https://drive.google.com/file/d/${fileId}/preview`
+    });
+  } catch (error) {
+    log(`❌ Drive link generation failed: ${error.message}`, 'error');
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to generate shareable link'
     });
   }
 });

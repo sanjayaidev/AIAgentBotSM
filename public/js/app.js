@@ -1437,3 +1437,172 @@ function convertDriveLink(viewLink) {
   }
   return viewLink;
 }
+
+/**
+ * Enhanced Video.js integration with Google Drive upload and share functionality
+ */
+
+/**
+ * Open Video.js player with a video URL
+ * Supports Google Drive links, direct URLs, and file uploads
+ * @param {string} videoUrl - The video URL to play
+ * @param {Object} options - Optional configuration
+ */
+function openVideoPlayerEnhanced(videoUrl, options = {}) {
+  const container = document.getElementById('videoPlayerContainer');
+  container.style.display = 'block';
+  
+  if (!videoPlayer) {
+    videoPlayer = videojs('videoPlayer', {
+      controls: true,
+      preload: 'auto',
+      fluid: true,
+      responsive: true
+    });
+  }
+  
+  // Convert Google Drive view link to direct stream link
+  const directUrl = convertDriveLinkEnhanced(videoUrl);
+  
+  // Set video source
+  videoPlayer.src({ 
+    type: options.type || 'video/mp4', 
+    src: directUrl 
+  });
+  
+  // Auto-play if not paused
+  if (!options.paused) {
+    videoPlayer.play();
+  }
+  
+  // Show share button if enabled
+  const shareBtn = document.getElementById('videoShareBtn');
+  if (options.showShare && shareBtn) {
+    shareBtn.style.display = 'inline-block';
+    shareBtn.onclick = () => shareVideoToDrive(directUrl, options.filename || 'video.mp4');
+  }
+}
+
+/**
+ * Upload video to Google Drive and play it using the public endpoint
+ * @param {string} videoUrl - Source video URL
+ * @param {string} filename - Desired filename
+ * @param {Object} credentials - Google Service Account credentials
+ */
+async function uploadAndPlayVideo(videoUrl, filename, credentials) {
+  try {
+    logMessage('📤 Uploading video to Google Drive...', 'info');
+    
+    const response = await fetch('/api/public/upload-to-drive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoUrl, filename, credentials })
+    });
+    
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Upload failed');
+    }
+    
+    logMessage(`✅ Video uploaded! Shareable link: ${result.shareableLink}`, 'success');
+    
+    // Play the uploaded video
+    openVideoPlayerEnhanced(result.shareableLink, {
+      showShare: false,
+      filename: filename
+    });
+    
+    return result;
+  } catch (error) {
+    logMessage(`❌ Upload failed: ${error.message}`, 'error');
+    alert(`Failed to upload video: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Share current video to Google Drive
+ * Opens a dialog for credentials input
+ */
+async function shareVideoToDrive(videoUrl, filename) {
+  const credentialsInput = prompt(
+    'Enter your Google Service Account credentials (JSON format):\n\n' +
+    'Example:\n' +
+    JSON.stringify({
+      client_email: 'your-service-account@project.iam.gserviceaccount.com',
+      private_key: '-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n',
+      project_id: 'your-project-id'
+    }, null, 2) +
+    '\n\nThese credentials are used only for this upload and are not stored.'
+  );
+  
+  if (!credentialsInput) return;
+  
+  try {
+    const credentials = JSON.parse(credentialsInput);
+    await uploadAndPlayVideo(videoUrl, filename, credentials);
+  } catch (error) {
+    alert('Invalid credentials format. Please ensure valid JSON.');
+    console.error('Credentials parse error:', error);
+  }
+}
+
+/**
+ * Enhanced Google Drive URL converter supporting multiple formats
+ * @param {string} viewLink - Google Drive view or share link
+ * @returns {string} Direct stream URL compatible with Video.js
+ */
+function convertDriveLinkEnhanced(viewLink) {
+  if (!viewLink) return viewLink;
+  
+  // Handle various Google Drive URL formats
+  const patterns = [
+    // https://drive.google.com/file/d/FILE_ID/view
+    /\/file\/d\/([^\/\?]+)/,
+    // https://drive.google.com/open?id=FILE_ID
+    /open\?id=([^&]+)/,
+    // https://drive.google.com/file/d/FILE_ID/preview
+    /\/file\/d\/([^\/\?]+)\/preview/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = viewLink.match(pattern);
+    if (match) {
+      const fileId = match[1];
+      return `https://drive.google.com/uc?export=download&id=${fileId}`;
+    }
+  }
+  
+  // Already a direct link or other URL
+  return viewLink;
+}
+
+/**
+ * Get shareable link for an existing Google Drive file
+ * @param {string} fileId - Google Drive file ID
+ * @param {Object} credentials - Google Service Account credentials
+ */
+async function getShareableLink(fileId, credentials) {
+  try {
+    const credsParam = encodeURIComponent(JSON.stringify(credentials));
+    const response = await fetch(`/api/public/drive-link/${fileId}?credentials=${credsParam}`);
+    const result = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(result.error || 'Failed to get shareable link');
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Error getting shareable link:', error);
+    throw error;
+  }
+}
+
+// Make functions globally available
+window.openVideoPlayerEnhanced = openVideoPlayerEnhanced;
+window.uploadAndPlayVideo = uploadAndPlayVideo;
+window.shareVideoToDrive = shareVideoToDrive;
+window.getShareableLink = getShareableLink;
+window.convertDriveLinkEnhanced = convertDriveLinkEnhanced;
