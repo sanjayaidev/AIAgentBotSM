@@ -376,7 +376,8 @@
 
   <!-- Video.js Player Modal -->
   <div id="videoPlayerContainer" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:10000;">
-    <div style="position:absolute; top:10px; right:20px; z-index:10001;">
+    <div style="position:absolute; top:10px; right:20px; z-index:10001; display:flex; gap:10px;">
+      <button id="videoShareBtn" onclick="shareCurrentVideo()" style="background:#4f46e5; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-size:14px; display:none;">📤 Share to Drive</button>
       <button onclick="closeVideoPlayer()" style="background:#dc2626; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer; font-size:14px;">✕ Close</button>
     </div>
     <div style="display:flex; align-items:center; justify-content:center; height:100%;">
@@ -388,5 +389,31 @@
 <script src="https://vjs.zencdn.net/8.6.1/video.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script src="/js/app.js"></script>
+<!-- Google Drive Upload & Video.js Integration Script -->
+<script>
+/**
+ * Share currently playing video to Google Drive
+ */
+function shareCurrentVideo() {
+  if (!videoPlayer) return;
+  
+  const currentSrc = videoPlayer.currentSrc();
+  const filename = prompt('Enter filename for Google Drive:', 'video_' + Date.now() + '.mp4');
+  
+  if (!filename) return;
+  
+  // Use the enhanced upload function from app.js
+  if (typeof uploadAndPlayVideo === 'function') {
+    uploadAndPlayVideo(currentSrc, filename, null).catch(err => {
+      console.error('Share failed:', err);
+    });
+  } else {
+    alert('Upload functionality not available. Please use the API directly.');
+  }
+}
+
+// Make globally available
+window.shareCurrentVideo = shareCurrentVideo;
+</script>
 </body>
 </html>
