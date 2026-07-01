@@ -1404,3 +1404,36 @@ async function loadProviderCredentials(provider) {
     console.log('Could not load provider credentials:', e.message);
   }
 }
+let videoPlayer = null;
+
+function openVideoPlayer(videoUrl) {
+  const container = document.getElementById('videoPlayerContainer');
+  container.style.display = 'block';
+  
+  if (!videoPlayer) {
+    videoPlayer = videojs('videoPlayer');
+  }
+  
+  // Convert Google Drive view link to direct stream link
+  const directUrl = convertDriveLink(videoUrl);
+  videoPlayer.src({ type: 'video/mp4', src: directUrl });
+  videoPlayer.play();
+}
+
+function closeVideoPlayer() {
+  const container = document.getElementById('videoPlayerContainer');
+  container.style.display = 'none';
+  if (videoPlayer) {
+    videoPlayer.pause();
+  }
+}
+
+function convertDriveLink(viewLink) {
+  // Convert https://drive.google.com/file/d/FILE_ID/view
+  // to https://drive.google.com/uc?export=download&id=FILE_ID
+  const match = viewLink.match(/\/file\/d\/([^\/]+)/);
+  if (match) {
+    return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+  }
+  return viewLink;
+}
