@@ -4,6 +4,7 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { Client, Pool } = require('pg');
+const { uploadVideoToGoogleDrive, validateGoogleDriveCredentials } = require('./lib/google-drive');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || process.env.PG_CONNECTION_STRING;
@@ -564,7 +565,7 @@ async function navigateToProviderBaseUrl(provider, command) {
 }
 
 // Helper: build a serializable context object safe for page.evaluate()
-function buildSerializableContext({ prompt, provider, command, chatIndex, imageSize, videoSize, code, credentials = {} }) {
+function buildSerializableContext({ prompt, provider, command, chatIndex, imageSize, videoSize, code, credentials = {}, googleDriveCredentials = null }) {
   // FIX: merge credentials fields to top level AND keep nested — provider scripts may use either
   return {
     prompt: prompt || '',
@@ -578,6 +579,7 @@ function buildSerializableContext({ prompt, provider, command, chatIndex, imageS
     email: credentials.email || '',
     password: credentials.password || '',
     apiKey: credentials.apiKey || credentials.api_key || '',
+    googleDriveCredentials: googleDriveCredentials || null,
     credentials: {
       email: credentials.email || '',
       password: credentials.password || '',
@@ -1300,6 +1302,7 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
     }
 
     const credentials = profileData.provider ? await getProviderCredentials(profileData.provider) : null;
+    const googleDriveCredentials = profileData.googleDriveCredentials || null;
 
     isRunning = true;
     try {
@@ -1314,6 +1317,7 @@ app.post('/execute-js', requireApiKey, async (req, res) => {
           password: credentials?.password || '',
           apiKey: credentials?.api_key || ''
         },
+        googleDriveCredentials: googleDriveCredentials,
         chatIndex: profileData.chatIndex,
         imageSize: profileData.imageSize,
         videoSize: profileData.videoSize
@@ -1541,6 +1545,42 @@ app.post('/providers/:provider/login', requireApiKey, async (req, res) => {
     isRunning = false;
     log(`❌ Login failed: ${e.message}`, 'error');
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GOOGLE DRIVE UPLOAD ENDPOINT ─────────────────────────
+app.post('/api/upload-to-drive', requireApiKey, async (req, res) => {
+  try {
+    const { videoUrl, filename, credentials } = req.body;
+    
+    if (!videoUrl || !filename || !credentials) {
+      return res.status(400).json({ error: 'Missing required parameters: videoUrl, filename, credentials' });
+    }
+    
+    // Validate credentials
+    const isValid = await validateGoogleDriveCredentials(credentials);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid Google Drive credentials' });
+    }
+    
+    log(`📤 Uploading video to Google Drive: ${filename}`);
+    
+    // Upload video to Google Drive
+    const shareableLink = await uploadVideoToGoogleDrive(videoUrl, filename, credentials);
+    
+    log(`✅ Video uploaded to Google Drive: ${shareableLink}`);
+    
+    res.json({ 
+      success: true, 
+      shareableLink,
+      originalUrl: videoUrl
+    });
+  } catch (error) {
+    log(`❌ Google Drive upload failed: ${error.message}`, 'error');
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to upload video to Google Drive'
+    });
   }
 });
 

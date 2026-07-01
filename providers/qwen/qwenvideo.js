@@ -87,5 +87,28 @@
 
   if (!qwenSrc) throw new Error('Timeout waiting for generated video');
 
+  // Upload to Google Drive if configured
+  const googleDriveCreds = context.googleDriveCredentials;
+  if (googleDriveCreds && googleDriveCreds.client_email && googleDriveCreds.private_key) {
+    try {
+      const uploadResult = await fetch('/api/upload-to-drive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrl: qwenSrc,
+          filename: `video-${Date.now()}.mp4`,
+          credentials: googleDriveCreds
+        })
+      });
+      
+      if (uploadResult.ok) {
+        const driveData = await uploadResult.json();
+        return driveData.shareableLink;
+      }
+    } catch (uploadErr) {
+      console.warn('Google Drive upload failed, returning original URL:', uploadErr.message);
+    }
+  }
+
   return qwenSrc;
 })();
